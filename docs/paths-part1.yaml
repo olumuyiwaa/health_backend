@@ -1,0 +1,1269 @@
+# docs/paths-part1.yaml  (auth · users · credentials · facilities)
+paths:
+
+  # ═══════════════════════════════════════════
+  # AUTH
+  # ═══════════════════════════════════════════
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new user
+      description: |
+        Creates a new user account. Role defaults to `NURSE` if omitted.
+        An email verification OTP is sent automatically.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+            examples:
+              nurse:
+                summary: Nurse registration
+                value:
+                  email: jane.doe@email.com
+                  password: Secure123
+                  firstName: Jane
+                  lastName: Doe
+                  role: NURSE
+                  designation: RN
+              facilityAdmin:
+                summary: Facility admin (created via POST /facilities)
+                value:
+                  email: admin@clinic.com
+                  password: Secure123
+                  firstName: John
+                  lastName: Smith
+                  role: FACILITY_ADMIN
+      responses:
+        '201':
+          description: Registration successful
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          id:    { type: string, format: uuid }
+                          email: { type: string }
+                          role:  { $ref: '#/components/schemas/UserRole' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login
+      description: |
+        Returns a `TokenPair` on success.
+        If the account has 2FA enabled, returns a `TwoFAChallenge` instead —
+        pass `challengeToken` + TOTP code to `POST /auth/2fa/verify`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Login successful or 2FA challenge issued
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/TokenPair'
+                  - $ref: '#/components/schemas/TwoFAChallenge'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /auth/verify-email:
+    post:
+      tags: [Auth]
+      summary: Verify email with OTP
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId, code]
+              properties:
+                userId: { type: string, format: uuid }
+                code:   { type: string, minLength: 6, maxLength: 6 }
+      responses:
+        '200':
+          description: Email verified
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+        '400':
+          description: Invalid or expired OTP
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /auth/resend-verification:
+    post:
+      tags: [Auth]
+      summary: Resend email verification OTP
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        '200':
+          description: OTP sent (response is identical whether email exists or not)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+
+  /auth/2fa/setup:
+    post:
+      tags: [Auth]
+      summary: Initiate 2FA setup — generates TOTP secret and QR code
+      description: |
+        Returns a base32 secret and QR code data URI.
+        Scan the QR code with an authenticator app (e.g. Google Authenticator),
+        then call `POST /auth/2fa/enable` with the TOTP code to activate.
+      responses:
+        '200':
+          description: 2FA secret generated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/TwoFASetupResponse' }
+
+  /auth/2fa/enable:
+    post:
+      tags: [Auth]
+      summary: Confirm and activate 2FA
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [totpCode]
+              properties:
+                totpCode: { type: string, minLength: 6, maxLength: 6 }
+      responses:
+        '200':
+          description: 2FA enabled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+        '400':
+          description: Invalid TOTP code
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /auth/2fa/verify:
+    post:
+      tags: [Auth]
+      summary: Complete login after 2FA challenge
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId, challengeToken, totpCode]
+              properties:
+                userId:         { type: string, format: uuid }
+                challengeToken: { type: string }
+                totpCode:       { type: string, minLength: 6, maxLength: 6 }
+      responses:
+        '200':
+          description: Authentication complete
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/TokenPair' }
+        '401':
+          description: Invalid TOTP or expired challenge
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Rotate access + refresh tokens
+      description: Refresh tokens are single-use. A new pair is issued on every call.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string }
+      responses:
+        '200':
+          description: New token pair
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          accessToken:  { type: string }
+                          refreshToken: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Request password reset link
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        '200':
+          description: Reset link sent (response is identical whether email exists or not)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+
+  /auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Reset password using token from email link
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              properties:
+                token:    { type: string }
+                password: { type: string, minLength: 8 }
+      responses:
+        '200':
+          description: Password reset. All active sessions revoked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+        '400':
+          description: Invalid or expired token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout current session
+      responses:
+        '200':
+          description: Logged out
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+
+  /auth/logout-all:
+    post:
+      tags: [Auth]
+      summary: Revoke all active sessions (all devices)
+      responses:
+        '200':
+          description: All sessions revoked
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+
+  /auth/sessions:
+    get:
+      tags: [Auth]
+      summary: List active sessions for current user
+      responses:
+        '200':
+          description: Active sessions
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Session' }
+
+  /auth/sessions/{sessionId}:
+    delete:
+      tags: [Auth]
+      summary: Revoke a specific session by ID
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Session revoked
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+
+  # ═══════════════════════════════════════════
+  # USERS
+  # ═══════════════════════════════════════════
+
+  /users:
+    get:
+      tags: [Users]
+      summary: List all users
+      description: '**Roles:** SUPER_ADMIN, RECRUITER'
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: role
+          in: query
+          schema: { $ref: '#/components/schemas/UserRole' }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/AccountStatus' }
+        - name: search
+          in: query
+          description: Search by email or name
+          schema: { type: string }
+      responses:
+        '200':
+          description: Paginated user list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/UserSummary' }
+                  pagination: { $ref: '#/components/schemas/PaginationMeta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /users/me:
+    get:
+      tags: [Users]
+      summary: Get current user's full profile
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/UserDetail' }
+    patch:
+      tags: [Users]
+      summary: Update current user's profile
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phone:              { type: string }
+                firstName:          { type: string }
+                lastName:           { type: string }
+                bio:                { type: string }
+                designation:        { $ref: '#/components/schemas/NurseDesignation' }
+                availabilityRadius: { type: number }
+                fcmToken:           { type: string, description: 'Firebase push token (mobile only)' }
+                latitude:           { type: number }
+                longitude:          { type: number }
+      responses:
+        '200':
+          description: Profile updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+
+  /users/me/password:
+    patch:
+      tags: [Users]
+      summary: Change password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword: { type: string }
+                newPassword:     { type: string, minLength: 8 }
+      responses:
+        '200':
+          description: Password changed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+        '400':
+          description: Current password incorrect
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /users/{id}:
+    get:
+      tags: [Users]
+      summary: Get a user by ID
+      description: '**Roles:** SUPER_ADMIN, RECRUITER'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: User detail
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/UserDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Users]
+      summary: Soft-delete (deactivate) a user
+      description: '**Roles:** SUPER_ADMIN'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: User deactivated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+
+  /users/{id}/suspend:
+    patch:
+      tags: [Users]
+      summary: Suspend a user account
+      description: '**Roles:** SUPER_ADMIN'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        '200':
+          description: User suspended
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+
+  /users/{id}/restore:
+    patch:
+      tags: [Users]
+      summary: Restore a suspended or deactivated user
+      description: '**Roles:** SUPER_ADMIN'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: User restored
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+
+  /users/admin/audit-logs:
+    get:
+      tags: [Users]
+      summary: Platform-wide audit trail
+      description: '**Roles:** SUPER_ADMIN'
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: resource
+          in: query
+          schema: { type: string, example: 'User' }
+        - name: userId
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Audit logs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:    { type: boolean }
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:         { type: string, format: uuid }
+                        action:     { type: string }
+                        resource:   { type: string }
+                        resourceId: { type: string }
+                        ipAddress:  { type: string }
+                        createdAt:  { type: string, format: date-time }
+                        user:
+                          type: object
+                          properties:
+                            email: { type: string }
+                            role:  { $ref: '#/components/schemas/UserRole' }
+                  pagination: { $ref: '#/components/schemas/PaginationMeta' }
+
+  # ═══════════════════════════════════════════
+  # CREDENTIALS
+  # ═══════════════════════════════════════════
+
+  /credentials:
+    post:
+      tags: [Credentials]
+      summary: Upload a credential document
+      description: |
+        **Roles:** NURSE  
+        Accepts `multipart/form-data`. File is stored privately in DigitalOcean Spaces.
+        Status defaults to `PENDING` until reviewed by an admin.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, type]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: 'PDF, JPG, PNG or WEBP, max 15 MB'
+                type:        { $ref: '#/components/schemas/CredentialType' }
+                customLabel: { type: string, description: 'Required when type=CUSTOM' }
+                issuedAt:    { type: string, format: date }
+                expiresAt:   { type: string, format: date }
+      responses:
+        '201':
+          description: Credential uploaded and pending review
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/CredentialDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '413':
+          description: File too large
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+    get:
+      tags: [Credentials]
+      summary: List all credentials (admin/recruiter)
+      description: '**Roles:** SUPER_ADMIN, RECRUITER'
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/CredentialStatus' }
+        - name: type
+          in: query
+          schema: { $ref: '#/components/schemas/CredentialType' }
+      responses:
+        '200':
+          description: Paginated credential list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:    { type: boolean }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/CredentialDetail' }
+                  pagination: { $ref: '#/components/schemas/PaginationMeta' }
+
+  /credentials/mine:
+    get:
+      tags: [Credentials]
+      summary: Get current nurse's own credentials (with download URLs)
+      description: '**Roles:** NURSE'
+      responses:
+        '200':
+          description: Credential list with signed download URLs
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/CredentialDetail' }
+
+  /credentials/admin/expiry-alerts:
+    get:
+      tags: [Credentials]
+      summary: Credentials expiring within N days
+      description: '**Roles:** SUPER_ADMIN, RECRUITER'
+      parameters:
+        - name: days
+          in: query
+          schema: { type: integer, default: 30 }
+          description: Look-ahead window in days
+      responses:
+        '200':
+          description: Expiring credentials
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/CredentialDetail' }
+
+  /credentials/{id}:
+    get:
+      tags: [Credentials]
+      summary: Get a credential with signed download URL
+      description: Nurses can only fetch their own credentials.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Credential detail
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/CredentialDetail' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Credentials]
+      summary: Delete an unreviewed credential
+      description: '**Roles:** NURSE — cannot delete approved credentials.'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Credential deleted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+        '400':
+          description: Cannot delete an approved credential
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /credentials/{id}/approve:
+    patch:
+      tags: [Credentials]
+      summary: Approve a credential
+      description: '**Roles:** SUPER_ADMIN, RECRUITER. Triggers push + email notification to nurse.'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Credential approved
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/CredentialDetail' }
+
+  /credentials/{id}/reject:
+    patch:
+      tags: [Credentials]
+      summary: Reject a credential with a reason
+      description: '**Roles:** SUPER_ADMIN, RECRUITER'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string }
+      responses:
+        '200':
+          description: Credential rejected
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+
+  # ═══════════════════════════════════════════
+  # FACILITIES
+  # ═══════════════════════════════════════════
+
+  /facilities:
+    post:
+      tags: [Facilities]
+      summary: Create a facility and its initial admin account
+      description: '**Roles:** SUPER_ADMIN'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, adminFirstName, adminLastName, adminPassword]
+              properties:
+                name:          { type: string }
+                email:         { type: string, format: email }
+                phone:         { type: string }
+                taxId:         { type: string }
+                npiNumber:     { type: string }
+                adminFirstName: { type: string }
+                adminLastName: { type: string }
+                adminPassword: { type: string, minLength: 8 }
+      responses:
+        '201':
+          description: Facility created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/FacilitySummary' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    get:
+      tags: [Facilities]
+      summary: List all facilities
+      description: '**Roles:** SUPER_ADMIN, RECRUITER'
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/AccountStatus' }
+        - name: search
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Paginated facility list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:    { type: boolean }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/FacilitySummary' }
+                  pagination: { $ref: '#/components/schemas/PaginationMeta' }
+
+  /facilities/{id}:
+    get:
+      tags: [Facilities]
+      summary: Get full facility detail
+      description: Facility users can only access their own facility.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Facility detail
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/FacilityDetail' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Facilities]
+      summary: Update facility info
+      description: '**Roles:** SUPER_ADMIN, FACILITY_ADMIN (own facility)'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:      { type: string }
+                phone:     { type: string }
+                taxId:     { type: string }
+                npiNumber: { type: string }
+      responses:
+        '200':
+          description: Facility updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/FacilitySummary' }
+
+  /facilities/{id}/logo:
+    post:
+      tags: [Facilities]
+      summary: Upload facility logo
+      description: '**Roles:** SUPER_ADMIN, FACILITY_ADMIN (own facility). Max 5 MB image.'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [logo]
+              properties:
+                logo:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Logo uploaded
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          logoUrl:   { type: string }
+                          signedUrl: { type: string }
+
+  /facilities/{id}/addresses:
+    post:
+      tags: [Facilities]
+      summary: Add an address to a facility
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [addressLine1, city, state, zipCode]
+              properties:
+                label:        { type: string, default: Primary }
+                addressLine1: { type: string }
+                addressLine2: { type: string }
+                city:         { type: string }
+                state:        { type: string }
+                zipCode:      { type: string }
+                isPrimary:    { type: boolean }
+      responses:
+        '201':
+          description: Address added
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/FacilityAddress' }
+
+  /facilities/{id}/addresses/{addrId}:
+    patch:
+      tags: [Facilities]
+      summary: Update a facility address
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: addrId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FacilityAddress' }
+      responses:
+        '200':
+          description: Address updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/FacilityAddress' }
+    delete:
+      tags: [Facilities]
+      summary: Delete a facility address
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: addrId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Address deleted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+
+  /facilities/{id}/billing:
+    put:
+      tags: [Facilities]
+      summary: Create or replace facility billing info
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FacilityBilling' }
+      responses:
+        '200':
+          description: Billing info saved
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/FacilityBilling' }
+
+  /facilities/{id}/requirements:
+    get:
+      tags: [Facilities]
+      summary: List workplace requirements for a facility
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Requirements list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/WorkplaceRequirement' }
+    post:
+      tags: [Facilities]
+      summary: Add or update a workplace requirement
+      description: Upserts by `credentialType` — one requirement per type per facility.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [credentialType]
+              properties:
+                credentialType:  { $ref: '#/components/schemas/CredentialType' }
+                customLabel:     { type: string }
+                isMandatory:     { type: boolean, default: true }
+                appliesToRoles:
+                  type: array
+                  items: { $ref: '#/components/schemas/NurseDesignation' }
+                notes: { type: string }
+      responses:
+        '201':
+          description: Requirement saved
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/WorkplaceRequirement' }
+
+  /facilities/{id}/requirements/{reqId}:
+    delete:
+      tags: [Facilities]
+      summary: Remove a workplace requirement
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: reqId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Requirement removed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+
+  /facilities/{id}/members:
+    post:
+      tags: [Facilities]
+      summary: Invite a team member to a facility
+      description: |
+        Creates a new `TEAM_MEMBER` user if the email doesn't exist,
+        then links them to the facility.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, firstName, lastName]
+              properties:
+                email:           { type: string, format: email }
+                firstName:       { type: string }
+                lastName:        { type: string }
+                jobTitle:        { type: string }
+                permissionsMask: { type: object, description: 'Granular permission toggle map' }
+      responses:
+        '201':
+          description: Member added
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/FacilityMember' }
+
+  /facilities/{id}/members/{memberId}:
+    patch:
+      tags: [Facilities]
+      summary: Update a team member's details or permissions
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: memberId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                jobTitle:        { type: string }
+                isActive:        { type: boolean }
+                permissionsMask: { type: object }
+      responses:
+        '200':
+          description: Member updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/FacilityMember' }
+    delete:
+      tags: [Facilities]
+      summary: Remove a team member from a facility
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: memberId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Member removed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+
+  /facilities/{id}/staffing-preferences:
+    put:
+      tags: [Facilities]
+      summary: Set or replace staffing preferences
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StaffingPreference' }
+      responses:
+        '200':
+          description: Preferences saved
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/StaffingPreference' }
+
+  /facilities/{id}/notification-preferences:
+    put:
+      tags: [Facilities]
+      summary: Set or replace notification preferences
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                emailOnNewBooking:    { type: boolean }
+                emailOnCancellation:  { type: boolean }
+                emailOnVisitComplete: { type: boolean }
+                smsOnEmergencyFill:   { type: boolean }
+                pushEnabled:          { type: boolean }
+      responses:
+        '200':
+          description: Notification preferences saved
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }

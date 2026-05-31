@@ -1,0 +1,734 @@
+openapi: 3.0.3
+
+info:
+  title: Healthcare Staffing Platform API
+  description: |
+    On-Demand Healthcare Staffing & Visit Management Portal — REST API.
+
+    ## Authentication
+    All protected endpoints require a **Bearer JWT** in the `Authorization` header:
+    ```
+    Authorization: Bearer <accessToken>
+    ```
+    Obtain tokens via `POST /auth/login`. Access tokens expire in **15 minutes**;
+    use `POST /auth/refresh` with a valid refresh token to rotate.
+
+    ## Roles
+    | Role | Description |
+    |------|-------------|
+    | `SUPER_ADMIN` | Full platform control |
+    | `RECRUITER` | Read-only admin access |
+    | `FACILITY_ADMIN` | Manages one facility tenant |
+    | `TEAM_MEMBER` | Scoped facility operator |
+    | `NURSE` | Field professional (mobile) |
+
+    ## File Uploads
+    All uploads are stored in **DigitalOcean Spaces** (private).
+    Use `POST /storage/signed-upload-url` for direct client-to-Spaces uploads,
+    or `POST /storage/upload/{folder}` for server-proxied multipart uploads.
+    Download links are short-lived signed URLs — never public.
+
+    ## Pagination
+    List endpoints accept `page` and `limit` query params and return:
+    ```json
+    { "pagination": { "page": 1, "limit": 20, "total": 100, "totalPages": 5 } }
+    ```
+
+    ## EVV Geofencing
+    Check-in/out enforces a **200-metre geofence** around the case address (Haversine).
+    Breaches create a `FLAGGED` visit requiring admin override approval.
+  version: 1.0.0
+  contact:
+    name: Qudus Elite LLC
+    email: dev@quduselite.com
+
+servers:
+  - url: https://api.yourdomain.com/api/v1
+    description: Production
+  - url: https://staging-api.yourdomain.com/api/v1
+    description: Staging
+  - url: http://localhost:8000/api/v1
+    description: Local development
+
+tags:
+  - name: Auth
+    description: Registration, login, 2FA, sessions, password reset
+  - name: Users
+    description: User management, suspension, profiles, audit logs
+  - name: Credentials
+    description: Nurse license & document upload, admin approval workflow
+  - name: Facilities
+    description: Facility profiles, addresses, billing, team members, requirements
+  - name: Cases
+    description: Patient cases and clinical parameters
+  - name: Shifts
+    description: Shift creation, marketplace, booking, cancellation
+  - name: Visits
+    description: EVV check-in / check-out, geofence, override approval
+  - name: Messaging
+    description: Real-time conversations and attachments
+  - name: Notifications
+    description: In-app notification inbox
+  - name: Billing
+    description: Invoices, payouts, Stripe, wallet
+  - name: Reports
+    description: Analytics dashboards and export data
+  - name: Storage
+    description: DigitalOcean Spaces — signed URLs and uploads
+
+# ─────────────────────────────────────────────
+# SECURITY SCHEMES
+# ─────────────────────────────────────────────
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  # ─── Reusable Parameters ──────────────────
+  parameters:
+    PageParam:
+      name: page
+      in: query
+      schema: { type: integer, default: 1, minimum: 1 }
+    LimitParam:
+      name: limit
+      in: query
+      schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+    FromParam:
+      name: from
+      in: query
+      description: ISO 8601 start date for range filter
+      schema: { type: string, format: date }
+    ToParam:
+      name: to
+      in: query
+      description: ISO 8601 end date for range filter
+      schema: { type: string, format: date }
+
+  # ─── Reusable Responses ───────────────────
+  responses:
+    Unauthorized:
+      description: Missing or invalid Bearer token
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Forbidden:
+      description: Authenticated but insufficient role/scope
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Conflict:
+      description: Conflict — e.g. shift already booked, email taken
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    UnprocessableEntity:
+      description: Validation failed
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ValidationErrorResponse' }
+    TooManyRequests:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  # ─── Schemas ──────────────────────────────
+  schemas:
+
+    # ── Primitives / Enums ─────────────────
+    UserRole:
+      type: string
+      enum: [SUPER_ADMIN, FACILITY_ADMIN, TEAM_MEMBER, NURSE, RECRUITER]
+
+    AccountStatus:
+      type: string
+      enum: [PENDING, ACTIVE, SUSPENDED, DEACTIVATED]
+
+    VerificationStatus:
+      type: string
+      enum: [UNVERIFIED, PENDING, VERIFIED, REJECTED]
+
+    NurseDesignation:
+      type: string
+      enum: [RN, LVN, LPN, CNA, HHA, THERAPIST, CAREGIVER]
+
+    CredentialType:
+      type: string
+      enum: [STATE_LICENSE, CPR_CERTIFICATION, TB_TEST, BACKGROUND_CHECK,
+             GOVERNMENT_ID, OIG_CHECK, SAM_CHECK, IMMUNIZATION,
+             WORK_AUTHORIZATION, CUSTOM]
+
+    CredentialStatus:
+      type: string
+      enum: [PENDING, APPROVED, REJECTED, EXPIRED]
+
+    VisitType:
+      type: string
+      enum: [ADMISSION, REGULAR, RESUMPTION_OF_CARE, RECERTIFICATION,
+             SUPERVISORY, DISCHARGE]
+
+    ShiftStatus:
+      type: string
+      enum: [OPEN, BOOKED, IN_PROGRESS, COMPLETED, CANCELLED, DISPUTED]
+
+    ShiftPattern:
+      type: string
+      enum: [ONE_TIME, RECURRING]
+
+    ShiftPeriod:
+      type: string
+      enum: [DAY, NIGHT, FLEXIBLE]
+
+    VisitStatus:
+      type: string
+      enum: [SCHEDULED, CHECKED_IN, CHECKED_OUT, VERIFIED, FLAGGED,
+             OVERRIDE_REQUESTED, OVERRIDE_APPROVED]
+
+    AssignmentStatus:
+      type: string
+      enum: [PENDING, ACCEPTED, REJECTED, CANCELLED, COMPLETED]
+
+    InvoiceStatus:
+      type: string
+      enum: [DRAFT, ISSUED, PAID, OVERDUE, VOID]
+
+    PayoutStatus:
+      type: string
+      enum: [PENDING, SETTLED, FAILED]
+
+    OasisType:
+      type: string
+      enum: [ADMISSION, RESUMPTION_OF_CARE, RECERTIFICATION, DISCHARGE]
+
+    StorageFolder:
+      type: string
+      enum: [credentials, facility-logos, facility-documents, avatars,
+             chat-attachments, visit-signatures, admin-documents]
+
+    # ── Generic Wrappers ───────────────────
+    SuccessResponse:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        message: { type: string }
+        data:    { type: object }
+
+    ErrorResponse:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        message: { type: string, example: 'Resource not found' }
+
+    ValidationErrorResponse:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        message: { type: string, example: 'Validation failed' }
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              field: { type: string }
+              message: { type: string }
+
+    PaginationMeta:
+      type: object
+      properties:
+        page:       { type: integer }
+        limit:      { type: integer }
+        total:      { type: integer }
+        totalPages: { type: integer }
+        hasNext:    { type: boolean }
+        hasPrev:    { type: boolean }
+
+    # ── Auth ───────────────────────────────
+    RegisterRequest:
+      type: object
+      required: [email, password, firstName, lastName]
+      properties:
+        email:       { type: string, format: email }
+        password:    { type: string, minLength: 8, description: 'Min 8 chars, 1 uppercase, 1 number' }
+        phone:       { type: string }
+        firstName:   { type: string }
+        lastName:    { type: string }
+        role:        { $ref: '#/components/schemas/UserRole' }
+        designation: { $ref: '#/components/schemas/NurseDesignation' }
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:    { type: string, format: email }
+        password: { type: string }
+
+    TokenPair:
+      type: object
+      properties:
+        accessToken:  { type: string }
+        refreshToken: { type: string }
+        sessionId:    { type: string, format: uuid }
+        user:
+          type: object
+          properties:
+            id:    { type: string, format: uuid }
+            email: { type: string }
+            role:  { $ref: '#/components/schemas/UserRole' }
+
+    TwoFAChallenge:
+      type: object
+      properties:
+        requires2FA:    { type: boolean, example: true }
+        challengeToken: { type: string }
+        userId:         { type: string, format: uuid }
+
+    TwoFASetupResponse:
+      type: object
+      properties:
+        secret:     { type: string, description: 'Base32 TOTP secret' }
+        qrCodeUrl:  { type: string, description: 'Data URI of QR code for authenticator app' }
+
+    Session:
+      type: object
+      properties:
+        id:          { type: string, format: uuid }
+        deviceModel: { type: string }
+        deviceOs:    { type: string }
+        ipAddress:   { type: string }
+        createdAt:   { type: string, format: date-time }
+        expiresAt:   { type: string, format: date-time }
+
+    # ── Users ──────────────────────────────
+    UserSummary:
+      type: object
+      properties:
+        id:                { type: string, format: uuid }
+        email:             { type: string }
+        role:              { $ref: '#/components/schemas/UserRole' }
+        status:            { $ref: '#/components/schemas/AccountStatus' }
+        verificationStatus: { $ref: '#/components/schemas/VerificationStatus' }
+        createdAt:         { type: string, format: date-time }
+        adminProfile:
+          type: object
+          nullable: true
+          properties:
+            firstName: { type: string }
+            lastName:  { type: string }
+        nurseProfile:
+          type: object
+          nullable: true
+          properties:
+            firstName:   { type: string }
+            lastName:    { type: string }
+            designation: { $ref: '#/components/schemas/NurseDesignation' }
+
+    UserDetail:
+      allOf:
+        - $ref: '#/components/schemas/UserSummary'
+        - type: object
+          properties:
+            phone:            { type: string }
+            twoFactorEnabled: { type: boolean }
+            lastLoginAt:      { type: string, format: date-time }
+            nurseProfile:
+              $ref: '#/components/schemas/NurseProfileDetail'
+            facilityMember:
+              type: object
+              nullable: true
+              properties:
+                facilityId: { type: string, format: uuid }
+                jobTitle:   { type: string }
+                facility:
+                  type: object
+                  properties:
+                    id:   { type: string, format: uuid }
+                    name: { type: string }
+
+    NurseProfileDetail:
+      type: object
+      properties:
+        id:                 { type: string, format: uuid }
+        firstName:          { type: string }
+        lastName:           { type: string }
+        designation:        { $ref: '#/components/schemas/NurseDesignation' }
+        avatarUrl:          { type: string, nullable: true }
+        bio:                { type: string, nullable: true }
+        yearsOfExperience:  { type: integer, nullable: true }
+        availabilityRadius: { type: number, description: 'Miles' }
+        isAvailable:        { type: boolean }
+        latitude:           { type: number, nullable: true }
+        longitude:          { type: number, nullable: true }
+        credentials:
+          type: array
+          items: { $ref: '#/components/schemas/CredentialSummary' }
+        wallet:
+          $ref: '#/components/schemas/Wallet'
+
+    # ── Credentials ────────────────────────
+    CredentialSummary:
+      type: object
+      properties:
+        id:        { type: string, format: uuid }
+        type:      { $ref: '#/components/schemas/CredentialType' }
+        status:    { $ref: '#/components/schemas/CredentialStatus' }
+        expiresAt: { type: string, format: date-time, nullable: true }
+
+    CredentialDetail:
+      allOf:
+        - $ref: '#/components/schemas/CredentialSummary'
+        - type: object
+          properties:
+            customLabel:     { type: string, nullable: true }
+            fileUrl:         { type: string }
+            downloadUrl:     { type: string, description: 'Short-lived signed URL' }
+            issuedAt:        { type: string, format: date-time, nullable: true }
+            rejectionReason: { type: string, nullable: true }
+            reviewedAt:      { type: string, format: date-time, nullable: true }
+            createdAt:       { type: string, format: date-time }
+
+    # ── Facilities ─────────────────────────
+    FacilitySummary:
+      type: object
+      properties:
+        id:        { type: string, format: uuid }
+        name:      { type: string }
+        email:     { type: string }
+        phone:     { type: string, nullable: true }
+        status:    { $ref: '#/components/schemas/AccountStatus' }
+        logoUrl:   { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+
+    FacilityDetail:
+      allOf:
+        - $ref: '#/components/schemas/FacilitySummary'
+        - type: object
+          properties:
+            taxId:              { type: string, nullable: true }
+            npiNumber:          { type: string, nullable: true }
+            addresses:
+              type: array
+              items: { $ref: '#/components/schemas/FacilityAddress' }
+            billingInfo:
+              $ref: '#/components/schemas/FacilityBilling'
+              nullable: true
+            staffingPreferences:
+              $ref: '#/components/schemas/StaffingPreference'
+              nullable: true
+            requirements:
+              type: array
+              items: { $ref: '#/components/schemas/WorkplaceRequirement' }
+            members:
+              type: array
+              items: { $ref: '#/components/schemas/FacilityMember' }
+
+    FacilityAddress:
+      type: object
+      properties:
+        id:           { type: string, format: uuid }
+        label:        { type: string }
+        addressLine1: { type: string }
+        addressLine2: { type: string, nullable: true }
+        city:         { type: string }
+        state:        { type: string }
+        zipCode:      { type: string }
+        latitude:     { type: number, nullable: true }
+        longitude:    { type: number, nullable: true }
+        isPrimary:    { type: boolean }
+
+    FacilityBilling:
+      type: object
+      properties:
+        billingName:  { type: string }
+        billingEmail: { type: string }
+        billingPhone: { type: string, nullable: true }
+        addressLine1: { type: string }
+        city:         { type: string }
+        state:        { type: string }
+        zipCode:      { type: string }
+
+    WorkplaceRequirement:
+      type: object
+      properties:
+        id:             { type: string, format: uuid }
+        credentialType: { $ref: '#/components/schemas/CredentialType' }
+        customLabel:    { type: string, nullable: true }
+        isMandatory:    { type: boolean }
+        appliesToRoles:
+          type: array
+          items: { $ref: '#/components/schemas/NurseDesignation' }
+        notes:          { type: string, nullable: true }
+
+    StaffingPreference:
+      type: object
+      properties:
+        preferredDesignations:
+          type: array
+          items: { $ref: '#/components/schemas/NurseDesignation' }
+        genderPreference:   { type: string, nullable: true }
+        maxRadiusMiles:     { type: number, nullable: true }
+        autoApproveBookings: { type: boolean }
+
+    FacilityMember:
+      type: object
+      properties:
+        id:              { type: string, format: uuid }
+        firstName:       { type: string }
+        lastName:        { type: string }
+        jobTitle:        { type: string, nullable: true }
+        isActive:        { type: boolean }
+        permissionsMask: { type: object, nullable: true }
+        user:
+          type: object
+          properties:
+            email:  { type: string }
+            status: { $ref: '#/components/schemas/AccountStatus' }
+
+    # ── Cases ──────────────────────────────
+    CaseSummary:
+      type: object
+      properties:
+        id:               { type: string, format: uuid }
+        publicIdentifier: { type: string, example: 'Case-PT-7701' }
+        facilityId:       { type: string, format: uuid }
+        visitType:        { $ref: '#/components/schemas/VisitType' }
+        city:             { type: string }
+        state:            { type: string }
+        isOasisCase:      { type: boolean }
+        isActive:         { type: boolean }
+        specialties:
+          type: array
+          items: { type: string }
+        createdAt:        { type: string, format: date-time }
+
+    CaseDetail:
+      allOf:
+        - $ref: '#/components/schemas/CaseSummary'
+        - type: object
+          properties:
+            patientFirstName: { type: string, nullable: true }
+            patientLastName:  { type: string, nullable: true }
+            dateOfBirth:      { type: string, format: date, nullable: true }
+            gender:           { type: string, nullable: true }
+            primaryDiagnosis: { type: string, nullable: true }
+            addressLine1:     { type: string }
+            addressLine2:     { type: string, nullable: true }
+            zipCode:          { type: string }
+            latitude:         { type: number, nullable: true }
+            longitude:        { type: number, nullable: true }
+            isOasisCase:      { type: boolean }
+            oasisType:        { $ref: '#/components/schemas/OasisType', nullable: true }
+            notes:            { type: string, nullable: true }
+            facility:
+              type: object
+              properties:
+                id:   { type: string, format: uuid }
+                name: { type: string }
+
+    # ── Shifts ─────────────────────────────
+    ShiftSummary:
+      type: object
+      properties:
+        id:                  { type: string, format: uuid }
+        caseId:              { type: string, format: uuid }
+        facilityId:          { type: string, format: uuid }
+        visitType:           { $ref: '#/components/schemas/VisitType' }
+        requiredDesignation: { $ref: '#/components/schemas/NurseDesignation' }
+        status:              { $ref: '#/components/schemas/ShiftStatus' }
+        scheduledStart:      { type: string, format: date-time }
+        scheduledEnd:        { type: string, format: date-time }
+        payRate:             { type: number, format: double }
+        chargeRate:          { type: number, format: double }
+        isUrgent:            { type: boolean }
+        isEmergencyFill:     { type: boolean }
+        period:              { $ref: '#/components/schemas/ShiftPeriod' }
+
+    ShiftDetail:
+      allOf:
+        - $ref: '#/components/schemas/ShiftSummary'
+        - type: object
+          properties:
+            title:            { type: string, nullable: true }
+            description:      { type: string, nullable: true }
+            specialties:
+              type: array
+              items: { type: string }
+            pattern:          { $ref: '#/components/schemas/ShiftPattern' }
+            estimatedDuration: { type: integer, description: 'Minutes', nullable: true }
+            recurringDays:
+              type: array
+              items: { type: integer, minimum: 0, maximum: 6 }
+              description: '0=Sun … 6=Sat'
+            recurringEndDate: { type: string, format: date, nullable: true }
+            genderPreference: { type: string, nullable: true }
+            billingType:      { type: string, default: 'HOURLY' }
+            case:             { $ref: '#/components/schemas/CaseSummary' }
+            assignments:
+              type: array
+              items: { $ref: '#/components/schemas/AssignmentSummary' }
+
+    AssignmentSummary:
+      type: object
+      properties:
+        id:             { type: string, format: uuid }
+        nurseProfileId: { type: string, format: uuid }
+        status:         { $ref: '#/components/schemas/AssignmentStatus' }
+        acceptedAt:     { type: string, format: date-time, nullable: true }
+        nurseProfile:
+          type: object
+          nullable: true
+          properties:
+            firstName:   { type: string }
+            lastName:    { type: string }
+            designation: { $ref: '#/components/schemas/NurseDesignation' }
+
+    # ── Visits ─────────────────────────────
+    VisitSummary:
+      type: object
+      properties:
+        id:              { type: string, format: uuid }
+        assignmentId:    { type: string, format: uuid }
+        nurseProfileId:  { type: string, format: uuid }
+        shiftId:         { type: string, format: uuid }
+        status:          { $ref: '#/components/schemas/VisitStatus' }
+        checkInTime:     { type: string, format: date-time, nullable: true }
+        checkOutTime:    { type: string, format: date-time, nullable: true }
+        durationMinutes: { type: integer, nullable: true }
+        overrideRequired: { type: boolean }
+
+    VisitDetail:
+      allOf:
+        - $ref: '#/components/schemas/VisitSummary'
+        - type: object
+          properties:
+            checkInLatitude:     { type: number, nullable: true }
+            checkInLongitude:    { type: number, nullable: true }
+            checkInDistance:     { type: number, description: 'Metres from case address', nullable: true }
+            checkOutLatitude:    { type: number, nullable: true }
+            checkOutLongitude:   { type: number, nullable: true }
+            overrideReason:      { type: string, nullable: true }
+            overrideApprovedById: { type: string, format: uuid, nullable: true }
+            overrideApprovedAt:  { type: string, format: date-time, nullable: true }
+            notes:               { type: string, nullable: true }
+            auditEvents:
+              type: array
+              items:
+                type: object
+                properties:
+                  action:      { type: string }
+                  performedById: { type: string, format: uuid }
+                  metadata:    { type: object }
+                  createdAt:   { type: string, format: date-time }
+
+    # ── Messaging ──────────────────────────
+    Conversation:
+      type: object
+      properties:
+        id:              { type: string, format: uuid }
+        participantIds:
+          type: array
+          items: { type: string, format: uuid }
+        facilityId:      { type: string, format: uuid, nullable: true }
+        lastMessageAt:   { type: string, format: date-time, nullable: true }
+        unreadCount:     { type: integer }
+
+    Message:
+      type: object
+      properties:
+        id:             { type: string, format: uuid }
+        conversationId: { type: string, format: uuid }
+        senderId:       { type: string, format: uuid }
+        content:        { type: string, nullable: true }
+        attachmentUrl:  { type: string, nullable: true }
+        attachmentType: { type: string, nullable: true }
+        status:
+          type: string
+          enum: [SENT, DELIVERED, READ]
+        readAt:         { type: string, format: date-time, nullable: true }
+        createdAt:      { type: string, format: date-time }
+
+    # ── Notifications ──────────────────────
+    Notification:
+      type: object
+      properties:
+        id:        { type: string, format: uuid }
+        type:
+          type: string
+          enum: [SHIFT_ALERT, BOOKING_CONFIRMATION, CREDENTIAL_EXPIRY,
+                 ASSIGNMENT_UPDATE, PAYMENT_ALERT, SYSTEM_ALERT,
+                 CREDENTIAL_APPROVED, CREDENTIAL_REJECTED, SHIFT_CANCELLED, NEW_MESSAGE]
+        channel:
+          type: string
+          enum: [EMAIL, PUSH, SMS]
+        title:     { type: string }
+        body:      { type: string }
+        isRead:    { type: boolean }
+        readAt:    { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+
+    # ── Billing ────────────────────────────
+    Invoice:
+      type: object
+      properties:
+        id:             { type: string, format: uuid }
+        invoiceNumber:  { type: string, example: 'INV-2026-00142' }
+        facilityId:     { type: string, format: uuid }
+        status:         { $ref: '#/components/schemas/InvoiceStatus' }
+        subtotal:       { type: number, format: double }
+        tax:            { type: number, format: double }
+        total:          { type: number, format: double }
+        periodStart:    { type: string, format: date }
+        periodEnd:      { type: string, format: date }
+        dueAt:          { type: string, format: date-time, nullable: true }
+        paidAt:         { type: string, format: date-time, nullable: true }
+        fileUrl:        { type: string, nullable: true }
+        lineItems:
+          type: array
+          items:
+            type: object
+            properties:
+              description: { type: string }
+              quantity:    { type: number }
+              unitRate:    { type: number }
+              amount:      { type: number }
+
+    Wallet:
+      type: object
+      properties:
+        id:               { type: string, format: uuid }
+        pendingBalance:   { type: number, format: double }
+        availableBalance: { type: number, format: double }
+        lifetimeEarnings: { type: number, format: double }
+
+    Payout:
+      type: object
+      properties:
+        id:               { type: string, format: uuid }
+        nurseProfileId:   { type: string, format: uuid }
+        grossCharge:      { type: number, format: double }
+        netPayout:        { type: number, format: double }
+        systemCommission: { type: number, format: double }
+        status:           { $ref: '#/components/schemas/PayoutStatus' }
+        paidAt:           { type: string, format: date-time, nullable: true }
+        createdAt:        { type: string, format: date-time }
+
+    # ── Storage ────────────────────────────
+    UploadResult:
+      type: object
+      properties:
+        objectKey:    { type: string, example: 'credentials/abc123.pdf' }
+        originalName: { type: string }
+        size:         { type: integer, description: 'Bytes' }
+        mimeType:     { type: string }
+        downloadUrl:  { type: string, description: 'Short-lived signed URL' }
+        expiresIn:    { type: integer, description: 'Seconds until URL expires' }
+
+security:
+  - BearerAuth: []

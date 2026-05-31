@@ -1,0 +1,1772 @@
+# docs/paths-part2.yaml  (cases · shifts · visits · messaging · notifications · billing · reports · storage)
+
+  # ═══════════════════════════════════════════
+  # CASES
+  # ═══════════════════════════════════════════
+
+  /cases:
+    post:
+      tags: [Cases]
+      summary: Create a patient case
+      description: |
+        **Roles:** SUPER_ADMIN, FACILITY_ADMIN, TEAM_MEMBER  
+        A random `publicIdentifier` (e.g. `Case-PT-7701`) is auto-assigned to protect PHI.
+        Nurses never see real patient names.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [facilityId, addressLine1, city, state, zipCode, visitType]
+              properties:
+                facilityId:       { type: string, format: uuid }
+                patientFirstName: { type: string }
+                patientLastName:  { type: string }
+                dateOfBirth:      { type: string, format: date }
+                gender:           { type: string }
+                primaryDiagnosis: { type: string }
+                notes:            { type: string }
+                addressLine1:     { type: string }
+                addressLine2:     { type: string }
+                city:             { type: string }
+                state:            { type: string }
+                zipCode:          { type: string }
+                visitType:        { $ref: '#/components/schemas/VisitType' }
+                specialties:
+                  type: array
+                  items: { type: string }
+                  example: [WOUND_CARE, PICC_LINE]
+                isOasisCase:      { type: boolean }
+                oasisType:        { $ref: '#/components/schemas/OasisType' }
+      responses:
+        '201':
+          description: Case created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/CaseDetail' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+    get:
+      tags: [Cases]
+      summary: List cases
+      description: |
+        Facility users see only their facility's cases.
+        Nurses see a filtered list (patient PII masked).
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: facilityId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: visitType
+          in: query
+          schema: { $ref: '#/components/schemas/VisitType' }
+        - name: isActive
+          in: query
+          schema: { type: boolean }
+        - name: search
+          in: query
+          description: Search by public identifier or patient name
+          schema: { type: string }
+      responses:
+        '200':
+          description: Paginated case list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:    { type: boolean }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/CaseSummary' }
+                  pagination: { $ref: '#/components/schemas/PaginationMeta' }
+
+  /cases/{id}:
+    get:
+      tags: [Cases]
+      summary: Get case detail
+      description: Patient PII is redacted for NURSE role.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Case detail
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/CaseDetail' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+    patch:
+      tags: [Cases]
+      summary: Update a case
+      description: '**Roles:** SUPER_ADMIN, FACILITY_ADMIN, TEAM_MEMBER (own facility)'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                patientFirstName: { type: string }
+                patientLastName:  { type: string }
+                primaryDiagnosis: { type: string }
+                notes:            { type: string }
+                addressLine1:     { type: string }
+                city:             { type: string }
+                state:            { type: string }
+                zipCode:          { type: string }
+                visitType:        { $ref: '#/components/schemas/VisitType' }
+                specialties:
+                  type: array
+                  items: { type: string }
+                isOasisCase:      { type: boolean }
+                oasisType:        { $ref: '#/components/schemas/OasisType' }
+                isActive:         { type: boolean }
+      responses:
+        '200':
+          description: Case updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/CaseDetail' }
+
+    delete:
+      tags: [Cases]
+      summary: Archive (soft-delete) a case
+      description: '**Roles:** SUPER_ADMIN, FACILITY_ADMIN'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Case archived
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+
+  # ═══════════════════════════════════════════
+  # SHIFTS
+  # ═══════════════════════════════════════════
+
+  /shifts:
+    post:
+      tags: [Shifts]
+      summary: Create a shift on a case
+      description: '**Roles:** SUPER_ADMIN, FACILITY_ADMIN, TEAM_MEMBER'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [caseId, visitType, requiredDesignation, scheduledStart, scheduledEnd, chargeRate, payRate]
+              properties:
+                caseId:               { type: string, format: uuid }
+                title:                { type: string }
+                visitType:            { $ref: '#/components/schemas/VisitType' }
+                requiredDesignation:  { $ref: '#/components/schemas/NurseDesignation' }
+                specialties:
+                  type: array
+                  items: { type: string }
+                pattern:              { $ref: '#/components/schemas/ShiftPattern' }
+                period:               { $ref: '#/components/schemas/ShiftPeriod' }
+                scheduledStart:       { type: string, format: date-time }
+                scheduledEnd:         { type: string, format: date-time }
+                estimatedDuration:    { type: integer, description: 'Minutes' }
+                recurringDays:
+                  type: array
+                  items: { type: integer, minimum: 0, maximum: 6 }
+                  description: '0=Sun … 6=Sat (RECURRING pattern only)'
+                recurringEndDate:     { type: string, format: date }
+                chargeRate:           { type: number, format: double }
+                payRate:              { type: number, format: double }
+                billingType:          { type: string, default: HOURLY }
+                isUrgent:             { type: boolean }
+                isEmergencyFill:      { type: boolean }
+                allowInstantBook:     { type: boolean, default: true }
+                genderPreference:     { type: string, enum: [any, male, female] }
+                internalNotes:        { type: string }
+      responses:
+        '201':
+          description: Shift created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/ShiftDetail' }
+        '400':
+          description: Case is inactive
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+    get:
+      tags: [Shifts]
+      summary: List shifts (admin/facility view)
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: facilityId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: caseId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/ShiftStatus' }
+        - name: nurseProfileId
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Paginated shift list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:    { type: boolean }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/ShiftSummary' }
+                  pagination: { $ref: '#/components/schemas/PaginationMeta' }
+
+  /shifts/marketplace:
+    get:
+      tags: [Shifts]
+      summary: Browse open shifts (nurse marketplace)
+      description: |
+        **Roles:** NURSE  
+        Returns `OPEN` shifts filtered to the nurse's designation.
+        Sorted by urgency then scheduled start.
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: designation
+          in: query
+          description: Override nurse's own designation filter
+          schema: { $ref: '#/components/schemas/NurseDesignation' }
+        - name: visitType
+          in: query
+          schema: { $ref: '#/components/schemas/VisitType' }
+        - name: isUrgent
+          in: query
+          schema: { type: boolean }
+        - name: minPay
+          in: query
+          schema: { type: number }
+        - name: maxPay
+          in: query
+          schema: { type: number }
+        - name: date
+          in: query
+          description: Filter by shift date (YYYY-MM-DD)
+          schema: { type: string, format: date }
+        - name: lat
+          in: query
+          schema: { type: number }
+        - name: lng
+          in: query
+          schema: { type: number }
+        - name: radiusMiles
+          in: query
+          schema: { type: number }
+      responses:
+        '200':
+          description: Open shifts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:    { type: boolean }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/ShiftSummary' }
+                  pagination: { $ref: '#/components/schemas/PaginationMeta' }
+
+  /shifts/nurse/my-shifts:
+    get:
+      tags: [Shifts]
+      summary: Get a nurse's own shift assignments
+      description: '**Roles:** NURSE'
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/AssignmentStatus' }
+      responses:
+        '200':
+          description: Nurse's assignments with shift and visit detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:    { type: boolean }
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:      { type: string, format: uuid }
+                        status:  { $ref: '#/components/schemas/AssignmentStatus' }
+                        shift:   { $ref: '#/components/schemas/ShiftDetail' }
+                        visit:   { $ref: '#/components/schemas/VisitSummary' }
+                  pagination: { $ref: '#/components/schemas/PaginationMeta' }
+
+  /shifts/{id}:
+    get:
+      tags: [Shifts]
+      summary: Get shift detail
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Shift detail with assignments
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/ShiftDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /shifts/{id}/book:
+    post:
+      tags: [Shifts]
+      summary: Instantly book an open shift
+      description: |
+        **Roles:** NURSE  
+        Uses a **pessimistic database lock** (`SELECT … FOR UPDATE`) to prevent
+        double-booking under concurrent requests. Returns `409` if the shift
+        was taken between request arrival and lock acquisition.
+        Also validates the nurse's designation and checks for time-overlap conflicts.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '201':
+          description: Shift booked, assignment and visit records created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/AssignmentSummary' }
+        '403':
+          description: Nurse designation does not match shift requirement
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '409':
+          description: Shift already booked or nurse has a time conflict
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /shifts/{id}/assign:
+    post:
+      tags: [Shifts]
+      summary: Manually assign a nurse to a shift
+      description: '**Roles:** SUPER_ADMIN, FACILITY_ADMIN'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nurseProfileId]
+              properties:
+                nurseProfileId: { type: string, format: uuid }
+      responses:
+        '201':
+          description: Assignment created, nurse notified via push + SMS
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/AssignmentSummary' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /shifts/{id}/cancel:
+    patch:
+      tags: [Shifts]
+      summary: Cancel a shift or a nurse's booking
+      description: |
+        - **NURSE**: cancels their own accepted booking; shift returns to `OPEN`
+        - **SUPER_ADMIN / FACILITY_ADMIN**: cancels the shift entirely
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        '200':
+          description: Shift or booking cancelled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+
+  # ═══════════════════════════════════════════
+  # VISITS (EVV)
+  # ═══════════════════════════════════════════
+
+  /visits:
+    get:
+      tags: [Visits]
+      summary: List visits
+      description: |
+        Nurses see only their own visits.
+        Admins and facility users see all visits (with facility scope applied).
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/VisitStatus' }
+        - name: nurseProfileId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: flaggedOnly
+          in: query
+          description: Filter to visits with override_required=true
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Paginated visit list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:    { type: boolean }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/VisitSummary' }
+                  pagination: { $ref: '#/components/schemas/PaginationMeta' }
+
+  /visits/{id}:
+    get:
+      tags: [Visits]
+      summary: Get visit detail with full audit trail
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Visit detail
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/VisitDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /visits/{id}/check-in:
+    post:
+      tags: [Visits]
+      summary: GPS check-in for a scheduled visit
+      description: |
+        **Roles:** NURSE  
+        Validates the nurse's GPS coordinates against the case address using
+        the **Haversine formula**. If distance exceeds the 200 m geofence, the visit
+        is flagged (`FLAGGED` status) and an override approval is required before
+        the shift can continue.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [latitude, longitude]
+              properties:
+                latitude:  { type: number, format: double, example: 40.7128 }
+                longitude: { type: number, format: double, example: -74.0060 }
+                qrCode:    { type: string, description: 'Optional QR verification code' }
+      responses:
+        '200':
+          description: Check-in successful
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/VisitDetail' }
+        '400':
+          description: Visit not in SCHEDULED state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: Geofence breach — override request created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: false }
+                  message: { type: string, example: 'Check-in flagged: you are 347m from the case address. Override request sent for review.' }
+
+  /visits/{id}/check-out:
+    post:
+      tags: [Visits]
+      summary: GPS check-out — completes the visit
+      description: |
+        **Roles:** NURSE  
+        Calculates visit duration from check-in time.
+        Marks the shift as `COMPLETED` and the assignment as `COMPLETED`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [latitude, longitude]
+              properties:
+                latitude:  { type: number, format: double }
+                longitude: { type: number, format: double }
+                notes:     { type: string }
+      responses:
+        '200':
+          description: Check-out successful, shift marked COMPLETED
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/VisitDetail' }
+        '400':
+          description: Visit not in CHECKED_IN state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /visits/{id}/override-approve:
+    patch:
+      tags: [Visits]
+      summary: Approve a geofence override to allow a flagged check-in
+      description: '**Roles:** SUPER_ADMIN, FACILITY_ADMIN'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Override approved, visit status set to CHECKED_IN
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/VisitDetail' }
+
+  # ═══════════════════════════════════════════
+  # MESSAGING
+  # ═══════════════════════════════════════════
+
+  /messages/conversations:
+    post:
+      tags: [Messaging]
+      summary: Start or retrieve a conversation
+      description: |
+        Pass `participantIds` — if a conversation with those exact participants
+        already exists, it is returned rather than duplicated.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [participantIds]
+              properties:
+                participantIds:
+                  type: array
+                  minItems: 2
+                  items: { type: string, format: uuid }
+                facilityId: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Conversation found or created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Conversation' }
+
+    get:
+      tags: [Messaging]
+      summary: List conversations for current user
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+      responses:
+        '200':
+          description: Conversations list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:    { type: boolean }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Conversation' }
+                  pagination: { $ref: '#/components/schemas/PaginationMeta' }
+
+  /messages/conversations/{conversationId}:
+    get:
+      tags: [Messaging]
+      summary: Get conversation detail
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Conversation detail
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Conversation' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /messages/conversations/{conversationId}/messages:
+    get:
+      tags: [Messaging]
+      summary: List messages in a conversation
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+      responses:
+        '200':
+          description: Paginated message list (newest first)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:    { type: boolean }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Message' }
+                  pagination: { $ref: '#/components/schemas/PaginationMeta' }
+
+    post:
+      tags: [Messaging]
+      summary: Send a text message to a conversation
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content: { type: string }
+      responses:
+        '201':
+          description: Message sent, recipient notified via WebSocket
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Message' }
+
+  /messages/conversations/{conversationId}/attachments:
+    post:
+      tags: [Messaging]
+      summary: Send a file attachment to a conversation
+      description: Multipart upload — stored in `chat-attachments` folder in Spaces.
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:    { type: string, format: binary }
+                caption: { type: string }
+      responses:
+        '201':
+          description: Attachment sent
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Message' }
+
+  /messages/{messageId}/read:
+    patch:
+      tags: [Messaging]
+      summary: Mark a message as read
+      parameters:
+        - name: messageId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Message marked read
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+
+  /messages/{messageId}:
+    delete:
+      tags: [Messaging]
+      summary: Delete own message (soft-delete)
+      parameters:
+        - name: messageId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Message deleted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+
+  /messages/unread-count:
+    get:
+      tags: [Messaging]
+      summary: Get total unread message count for current user
+      responses:
+        '200':
+          description: Unread count
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          unreadCount: { type: integer }
+
+  # ═══════════════════════════════════════════
+  # NOTIFICATIONS
+  # ═══════════════════════════════════════════
+
+  /notifications:
+    get:
+      tags: [Notifications]
+      summary: List current user's notifications
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: unreadOnly
+          in: query
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Paginated notification list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:    { type: boolean }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Notification' }
+                  pagination: { $ref: '#/components/schemas/PaginationMeta' }
+
+  /notifications/read-all:
+    patch:
+      tags: [Notifications]
+      summary: Mark all unread notifications as read
+      responses:
+        '200':
+          description: All notifications marked as read
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+
+  /notifications/{id}/read:
+    patch:
+      tags: [Notifications]
+      summary: Mark a single notification as read
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Notification marked as read
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+
+  # ═══════════════════════════════════════════
+  # BILLING
+  # ═══════════════════════════════════════════
+
+  /billing/invoices:
+    post:
+      tags: [Billing]
+      summary: Generate an invoice for a facility
+      description: '**Roles:** SUPER_ADMIN, FACILITY_ADMIN'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [facilityId, periodStart, periodEnd]
+              properties:
+                facilityId:  { type: string, format: uuid }
+                periodStart: { type: string, format: date }
+                periodEnd:   { type: string, format: date }
+                notes:       { type: string }
+                dueAt:       { type: string, format: date-time }
+      responses:
+        '201':
+          description: Invoice generated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Invoice' }
+
+    get:
+      tags: [Billing]
+      summary: List invoices
+      description: Facility users see only their own invoices.
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: facilityId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/InvoiceStatus' }
+        - $ref: '#/components/parameters/FromParam'
+        - $ref: '#/components/parameters/ToParam'
+      responses:
+        '200':
+          description: Paginated invoice list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:    { type: boolean }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Invoice' }
+                  pagination: { $ref: '#/components/schemas/PaginationMeta' }
+
+  /billing/invoices/{id}:
+    get:
+      tags: [Billing]
+      summary: Get invoice detail with line items
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Invoice detail
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Invoice' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /billing/invoices/{id}/issue:
+    patch:
+      tags: [Billing]
+      summary: Issue a draft invoice (send to facility)
+      description: '**Roles:** SUPER_ADMIN'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Invoice issued
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Invoice' }
+
+  /billing/invoices/{id}/void:
+    patch:
+      tags: [Billing]
+      summary: Void an invoice
+      description: '**Roles:** SUPER_ADMIN'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Invoice voided
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+
+  /billing/stripe/payment-intent:
+    post:
+      tags: [Billing]
+      summary: Create a Stripe PaymentIntent for an invoice
+      description: '**Roles:** FACILITY_ADMIN, SUPER_ADMIN'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [invoiceId]
+              properties:
+                invoiceId: { type: string, format: uuid }
+      responses:
+        '201':
+          description: PaymentIntent created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          clientSecret: { type: string }
+                          amount:       { type: integer, description: 'Cents' }
+
+  /billing/stripe/webhook:
+    post:
+      tags: [Billing]
+      summary: Stripe webhook receiver
+      description: |
+        Receives `payment_intent.succeeded`, `transfer.created` etc.  
+        Must be called by Stripe — verify `stripe-signature` header.  
+        **No auth header required** (verified by webhook secret).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200':
+          description: Webhook acknowledged
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  received: { type: boolean }
+        '400':
+          description: Invalid webhook signature
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /billing/wallet:
+    get:
+      tags: [Billing]
+      summary: Get current nurse's wallet balances
+      description: '**Roles:** NURSE'
+      responses:
+        '200':
+          description: Wallet balances
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Wallet' }
+
+  /billing/payouts:
+    get:
+      tags: [Billing]
+      summary: List payouts
+      description: |
+        - **NURSE**: sees own payouts only
+        - **SUPER_ADMIN**: sees all payouts, filterable by `nurseProfileId`
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: nurseProfileId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/PayoutStatus' }
+        - $ref: '#/components/parameters/FromParam'
+        - $ref: '#/components/parameters/ToParam'
+      responses:
+        '200':
+          description: Payout list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:    { type: boolean }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Payout' }
+                  pagination: { $ref: '#/components/schemas/PaginationMeta' }
+
+  /billing/payouts/process:
+    post:
+      tags: [Billing]
+      summary: Process pending payouts for a nurse via Stripe Connect
+      description: '**Roles:** SUPER_ADMIN'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nurseProfileId]
+              properties:
+                nurseProfileId: { type: string, format: uuid }
+                amount: { type: number, description: 'Override amount (defaults to full available balance)' }
+      responses:
+        '200':
+          description: Payout processed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Payout' }
+
+  /billing/summary:
+    get:
+      tags: [Billing]
+      summary: Billing summary for a facility or platform
+      description: '**Roles:** SUPER_ADMIN, FACILITY_ADMIN'
+      parameters:
+        - name: facilityId
+          in: query
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/FromParam'
+        - $ref: '#/components/parameters/ToParam'
+      responses:
+        '200':
+          description: Billing summary
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          upcomingCharges: { type: number }
+                          overdueBalance:  { type: number }
+                          totalPaid:       { type: number }
+                          openInvoices:    { type: integer }
+
+  # ═══════════════════════════════════════════
+  # REPORTS
+  # ═══════════════════════════════════════════
+
+  /reports/dashboard:
+    get:
+      tags: [Reports]
+      summary: Platform-wide KPI dashboard
+      description: '**Roles:** SUPER_ADMIN, RECRUITER'
+      responses:
+        '200':
+          description: Dashboard KPIs
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          users:
+                            type: object
+                            properties:
+                              total:            { type: integer }
+                              activeNurses:     { type: integer }
+                              activeFacilities: { type: integer }
+                          shifts:
+                            type: object
+                            properties:
+                              open:                { type: integer }
+                              completedThisMonth:  { type: integer }
+                          credentials:
+                            type: object
+                            properties:
+                              pendingReview: { type: integer }
+                          visits:
+                            type: object
+                            properties:
+                              flaggedOverrides: { type: integer }
+                          payouts:
+                            type: object
+                            properties:
+                              pendingCount:  { type: integer }
+                              pendingAmount: { type: number }
+
+  /reports/shifts:
+    get:
+      tags: [Reports]
+      summary: Shift analytics — fill rate, completion rate, breakdowns
+      parameters:
+        - $ref: '#/components/parameters/FromParam'
+        - $ref: '#/components/parameters/ToParam'
+        - name: facilityId
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Shift analytics
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          period:  { type: object }
+                          summary:
+                            type: object
+                            properties:
+                              total:     { type: integer }
+                              open:      { type: integer }
+                              filled:    { type: integer }
+                              completed: { type: integer }
+                              cancelled: { type: integer }
+                          rates:
+                            type: object
+                            properties:
+                              fillRate:       { type: string, example: '82.5%' }
+                              completionRate: { type: string, example: '76.0%' }
+                          byDesignation:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                designation: { $ref: '#/components/schemas/NurseDesignation' }
+                                count:       { type: integer }
+                          byVisitType:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                visitType: { $ref: '#/components/schemas/VisitType' }
+                                count:     { type: integer }
+
+  /reports/revenue:
+    get:
+      tags: [Reports]
+      summary: Revenue dashboard — gross, net payouts, commission, by facility & month
+      description: '**Roles:** SUPER_ADMIN'
+      parameters:
+        - $ref: '#/components/parameters/FromParam'
+        - $ref: '#/components/parameters/ToParam'
+      responses:
+        '200':
+          description: Revenue data
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          totals:
+                            type: object
+                            properties:
+                              grossRevenue:     { type: number }
+                              netPayouts:       { type: number }
+                              systemCommission: { type: number }
+                              settledPayouts:   { type: integer }
+                          byFacility: { type: array, items: { type: object } }
+                          byMonth:    { type: array, items: { type: object } }
+
+  /reports/facilities/{facilityId}/performance:
+    get:
+      tags: [Reports]
+      summary: Facility performance — shifts, visits, top nurses
+      parameters:
+        - name: facilityId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/FromParam'
+        - $ref: '#/components/parameters/ToParam'
+      responses:
+        '200':
+          description: Facility performance data
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          shifts:     { type: object }
+                          visits:     { type: object }
+                          activeCases: { type: integer }
+                          topNurses:  { type: array, items: { type: object } }
+
+  /reports/facilities/{facilityId}/dashboard:
+    get:
+      tags: [Reports]
+      summary: Live facility dashboard — open shifts, upcoming, pending overrides
+      parameters:
+        - name: facilityId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Facility dashboard
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          stats:
+                            type: object
+                            properties:
+                              openShifts:         { type: integer }
+                              shiftsFillThisWeek: { type: integer }
+                              activeCases:        { type: integer }
+                              pendingOverrides:   { type: integer }
+                          upcomingShifts:
+                            type: array
+                            items: { $ref: '#/components/schemas/ShiftSummary' }
+
+  /reports/workers:
+    get:
+      tags: [Reports]
+      summary: Worker activity — completed shifts, earnings, avg visit time
+      description: '**Roles:** SUPER_ADMIN, RECRUITER, FACILITY_ADMIN'
+      parameters:
+        - $ref: '#/components/parameters/FromParam'
+        - $ref: '#/components/parameters/ToParam'
+        - name: facilityId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: designation
+          in: query
+          schema: { $ref: '#/components/schemas/NurseDesignation' }
+      responses:
+        '200':
+          description: Worker activity data
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:               { type: string, format: uuid }
+                            name:             { type: string }
+                            designation:      { $ref: '#/components/schemas/NurseDesignation' }
+                            completedShifts:  { type: integer }
+                            cancelledShifts:  { type: integer }
+                            upcomingShifts:   { type: integer }
+                            avgVisitMinutes:  { type: integer }
+                            totalEarnings:    { type: number }
+
+  /reports/credentials/expiry:
+    get:
+      tags: [Reports]
+      summary: Credential expiry report — expiring soon + already expired
+      description: '**Roles:** SUPER_ADMIN, RECRUITER'
+      parameters:
+        - name: days
+          in: query
+          description: Look-ahead window (default 30)
+          schema: { type: integer, default: 30 }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/CredentialStatus' }
+      responses:
+        '200':
+          description: Expiry report
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          thresholdDays:  { type: integer }
+                          expiringSoon:
+                            type: object
+                            properties:
+                              count:   { type: integer }
+                              byType:  { type: object }
+                              records: { type: array, items: { $ref: '#/components/schemas/CredentialDetail' } }
+                          alreadyExpired:
+                            type: object
+                            properties:
+                              count:   { type: integer }
+                              byType:  { type: object }
+                              records: { type: array, items: { $ref: '#/components/schemas/CredentialDetail' } }
+
+  /reports/billing:
+    get:
+      tags: [Reports]
+      summary: Billing report — invoice totals, by status, recent invoices
+      description: '**Roles:** SUPER_ADMIN, FACILITY_ADMIN'
+      parameters:
+        - $ref: '#/components/parameters/FromParam'
+        - $ref: '#/components/parameters/ToParam'
+        - name: facilityId
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Billing report
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          totals:         { type: object }
+                          byStatus:       { type: array, items: { type: object } }
+                          recentInvoices: { type: array, items: { $ref: '#/components/schemas/Invoice' } }
+
+  /reports/audit-trail:
+    get:
+      tags: [Reports]
+      summary: Full audit trail with filters
+      description: '**Roles:** SUPER_ADMIN'
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/FromParam'
+        - $ref: '#/components/parameters/ToParam'
+        - name: userId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: resource
+          in: query
+          schema: { type: string, example: Shift }
+        - name: action
+          in: query
+          schema:
+            type: string
+            enum: [CREATE, UPDATE, DELETE, LOGIN, LOGOUT, APPROVE, REJECT,
+                   SUSPEND, RESTORE, UPLOAD, DOWNLOAD]
+      responses:
+        '200':
+          description: Paginated audit log
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:    { type: boolean }
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:           { type: string, format: uuid }
+                        action:       { type: string }
+                        resource:     { type: string }
+                        resourceId:   { type: string }
+                        previousData: { type: object }
+                        newData:      { type: object }
+                        ipAddress:    { type: string }
+                        createdAt:    { type: string, format: date-time }
+                        user:
+                          type: object
+                          properties:
+                            email: { type: string }
+                            role:  { $ref: '#/components/schemas/UserRole' }
+                  pagination: { $ref: '#/components/schemas/PaginationMeta' }
+
+  # ═══════════════════════════════════════════
+  # STORAGE
+  # ═══════════════════════════════════════════
+
+  /storage/folders:
+    get:
+      tags: [Storage]
+      summary: List upload folders accessible to the current user
+      description: Returns allowed extensions and max size for each folder the user can write to.
+      responses:
+        '200':
+          description: Accessible folders
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            folder:
+                              { $ref: '#/components/schemas/StorageFolder' }
+                            allowedExtensions:
+                              type: array
+                              items: { type: string }
+                            maxSizeMB: { type: integer }
+
+  /storage/signed-upload-url:
+    post:
+      tags: [Storage]
+      summary: Request a pre-signed PUT URL for direct-to-Spaces upload
+      description: |
+        Preferred for large files. The client PUTs the file directly to DigitalOcean Spaces
+        using the returned URL (valid for **5 minutes**).  
+        After a successful upload, call `POST /storage/confirm` to validate and get a download URL.
+
+        **Folder access is role-gated:**
+
+        | Folder | Allowed Roles |
+        |--------|---------------|
+        | `credentials` | NURSE |
+        | `facility-logos` | SUPER_ADMIN, FACILITY_ADMIN |
+        | `facility-documents` | SUPER_ADMIN, FACILITY_ADMIN, TEAM_MEMBER |
+        | `avatars` | All roles |
+        | `chat-attachments` | All roles |
+        | `visit-signatures` | NURSE |
+        | `admin-documents` | SUPER_ADMIN |
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [folder, filename, contentType]
+              properties:
+                folder:      { $ref: '#/components/schemas/StorageFolder' }
+                filename:    { type: string, example: 'nursing-license.pdf' }
+                contentType: { type: string, example: 'application/pdf' }
+      responses:
+        '201':
+          description: Signed URL generated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          uploadUrl:   { type: string, description: 'Pre-signed PUT URL (5 min)' }
+                          objectKey:   { type: string, example: 'credentials/abc-uuid.pdf' }
+                          expiresIn:   { type: integer, example: 300 }
+                          maxBytes:    { type: integer }
+                          confirmUrl:  { type: string }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '415':
+          description: File type not allowed for this folder
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /storage/confirm:
+    post:
+      tags: [Storage]
+      summary: Confirm a completed direct upload and receive a download URL
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [objectKey]
+              properties:
+                objectKey: { type: string, example: 'credentials/abc-uuid.pdf' }
+      responses:
+        '200':
+          description: Upload confirmed, download URL returned
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          objectKey:   { type: string }
+                          downloadUrl: { type: string, description: 'Signed URL valid for 1 hour' }
+                          expiresIn:   { type: integer, example: 3600 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /storage/upload/{folder}:
+    post:
+      tags: [Storage]
+      summary: Proxied multipart upload through the API server
+      description: |
+        Suitable for smaller files. The file is streamed through the API to Spaces.  
+        For large files use `POST /storage/signed-upload-url` instead.
+      parameters:
+        - name: folder
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/StorageFolder' }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '201':
+          description: File uploaded
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/UploadResult' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '413':
+          description: File exceeds folder size limit
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '415':
+          description: File type not allowed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /storage/download:
+    get:
+      tags: [Storage]
+      summary: Generate a fresh signed download URL for a private object
+      parameters:
+        - name: key
+          in: query
+          required: true
+          description: Spaces object key (e.g. `credentials/abc.pdf`)
+          schema: { type: string }
+        - name: expiresIn
+          in: query
+          description: URL validity in seconds (max 86400 / 24 h)
+          schema: { type: integer, default: 3600 }
+      responses:
+        '200':
+          description: Signed download URL
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          objectKey:   { type: string }
+                          downloadUrl: { type: string }
+                          expiresIn:   { type: integer }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /storage:
+    delete:
+      tags: [Storage]
+      summary: Hard-delete an object from Spaces
+      description: '**Roles:** SUPER_ADMIN'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key]
+              properties:
+                key: { type: string, example: 'credentials/abc.pdf' }
+      responses:
+        '200':
+          description: Object deleted
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          objectKey: { type: string }
+        '403': { $ref: '#/components/responses/Forbidden' }

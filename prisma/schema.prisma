@@ -1,0 +1,782 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+
+enum UserRole {
+  SUPER_ADMIN
+  FACILITY_ADMIN
+  TEAM_MEMBER
+  NURSE
+  RECRUITER
+}
+
+enum NurseDesignation {
+  RN
+  LVN
+  LPN
+  CNA
+  HHA
+  THERAPIST
+  CAREGIVER
+}
+
+enum AccountStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+}
+
+enum VerificationStatus {
+  UNVERIFIED
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum CredentialStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+enum CredentialType {
+  STATE_LICENSE
+  CPR_CERTIFICATION
+  TB_TEST
+  BACKGROUND_CHECK
+  GOVERNMENT_ID
+  OIG_CHECK
+  SAM_CHECK
+  IMMUNIZATION
+  WORK_AUTHORIZATION
+  CUSTOM
+}
+
+enum VisitType {
+  ADMISSION
+  REGULAR
+  RESUMPTION_OF_CARE
+  RECERTIFICATION
+  SUPERVISORY
+  DISCHARGE
+}
+
+enum ShiftStatus {
+  OPEN
+  BOOKED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  DISPUTED
+}
+
+enum ShiftPattern {
+  ONE_TIME
+  RECURRING
+}
+
+enum ShiftPeriod {
+  DAY
+  NIGHT
+  FLEXIBLE
+}
+
+enum AssignmentStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  CANCELLED
+  COMPLETED
+}
+
+enum VisitStatus {
+  SCHEDULED
+  CHECKED_IN
+  CHECKED_OUT
+  VERIFIED
+  FLAGGED
+  OVERRIDE_REQUESTED
+  OVERRIDE_APPROVED
+}
+
+enum MessageStatus {
+  SENT
+  DELIVERED
+  READ
+}
+
+enum NotificationChannel {
+  EMAIL
+  PUSH
+  SMS
+}
+
+enum NotificationType {
+  SHIFT_ALERT
+  BOOKING_CONFIRMATION
+  CREDENTIAL_EXPIRY
+  ASSIGNMENT_UPDATE
+  PAYMENT_ALERT
+  SYSTEM_ALERT
+  CREDENTIAL_APPROVED
+  CREDENTIAL_REJECTED
+  SHIFT_CANCELLED
+  NEW_MESSAGE
+}
+
+enum PayoutStatus {
+  PENDING
+  SETTLED
+  FAILED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PAID
+  OVERDUE
+  VOID
+}
+
+enum OasisType {
+  ADMISSION
+  RESUMPTION_OF_CARE
+  RECERTIFICATION
+  DISCHARGE
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  APPROVE
+  REJECT
+  SUSPEND
+  RESTORE
+  UPLOAD
+  DOWNLOAD
+}
+
+// ─────────────────────────────────────────────
+// USERS & AUTH
+// ─────────────────────────────────────────────
+
+model User {
+  id                String        @id @default(uuid())
+  email             String        @unique
+  phone             String?       @unique
+  passwordHash      String
+  role              UserRole
+  status            AccountStatus @default(PENDING)
+  verificationStatus VerificationStatus @default(UNVERIFIED)
+  emailVerifiedAt   DateTime?
+  phoneVerifiedAt   DateTime?
+  twoFactorEnabled  Boolean       @default(false)
+  twoFactorSecret   String?
+  lastLoginAt       DateTime?
+  lastLoginIp       String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  deletedAt         DateTime?
+
+  // Relations
+  adminProfile      AdminProfile?
+  nurseProfile      NurseProfile?
+  sessions          Session[]
+  passwordResets    PasswordReset[]
+  otpCodes          OtpCode[]
+  sentMessages      Message[]           @relation("SentMessages")
+  notifications     Notification[]
+  auditLogs         AuditLog[]
+  facilityMember    FacilityMember?
+
+  @@index([email])
+  @@index([role])
+  @@index([status])
+}
+
+model AdminProfile {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  firstName   String
+  lastName    String
+  avatarUrl   String?
+  department  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  userId       String
+  token        String   @unique
+  deviceModel  String?
+  deviceOs     String?
+  ipAddress    String?
+  userAgent    String?
+  isActive     Boolean  @default(true)
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  revokedAt    DateTime?
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
+}
+
+model PasswordReset {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model OtpCode {
+  id        String   @id @default(uuid())
+  userId    String
+  code      String
+  purpose   String   // email_verify | phone_verify | 2fa | password_reset
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose])
+}
+
+// ─────────────────────────────────────────────
+// NURSE PROFILE & CREDENTIALS
+// ─────────────────────────────────────────────
+
+model NurseProfile {
+  id                  String           @id @default(uuid())
+  userId              String           @unique
+  firstName           String
+  lastName            String
+  designation         NurseDesignation
+  avatarUrl           String?
+  bio                 String?
+  yearsOfExperience   Int?
+  availabilityRadius  Float?           // miles
+  isAvailable         Boolean          @default(true)
+  backgroundChecked   Boolean          @default(false)
+  stripeAccountId     String?
+  fcmToken            String?
+  latitude            Float?
+  longitude           Float?
+  addressLine1        String?
+  addressLine2        String?
+  city                String?
+  state               String?
+  zipCode             String?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  user                User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  credentials         Credential[]
+  assignments         ShiftAssignment[]
+  visits              Visit[]
+  wallet              Wallet?
+  payouts             Payout[]
+
+  @@index([designation])
+  @@index([isAvailable])
+}
+
+model Credential {
+  id              String           @id @default(uuid())
+  nurseProfileId  String
+  type            CredentialType
+  customLabel     String?          // for CUSTOM type
+  fileUrl         String           // DO Spaces signed path
+  fileKey         String           // DO Spaces object key
+  status          CredentialStatus @default(PENDING)
+  issuedAt        DateTime?
+  expiresAt       DateTime?
+  rejectionReason String?
+  reviewedById    String?
+  reviewedAt      DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  nurseProfile    NurseProfile     @relation(fields: [nurseProfileId], references: [id], onDelete: Cascade)
+
+  @@index([nurseProfileId, type])
+  @@index([expiresAt])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────
+// FACILITIES
+// ─────────────────────────────────────────────
+
+model Facility {
+  id                   String   @id @default(uuid())
+  name                 String
+  slug                 String   @unique
+  email                String   @unique
+  phone                String?
+  taxId                String?
+  npiNumber            String?
+  logoUrl              String?
+  status               AccountStatus @default(PENDING)
+  stripeCustomerId     String?
+  stripePaymentMethodId String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  deletedAt            DateTime?
+
+  addresses            FacilityAddress[]
+  members              FacilityMember[]
+  requirements         WorkplaceRequirement[]
+  staffingPreferences  StaffingPreference?
+  notificationPrefs    FacilityNotificationPref?
+  cases                Case[]
+  invoices             Invoice[]
+  billingInfo          FacilityBilling?
+
+  @@index([status])
+}
+
+model FacilityAddress {
+  id           String   @id @default(uuid())
+  facilityId   String
+  label        String   @default("Primary")
+  addressLine1 String
+  addressLine2 String?
+  city         String
+  state        String
+  zipCode      String
+  country      String   @default("US")
+  latitude     Float?
+  longitude    Float?
+  isPrimary    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  facility     Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+}
+
+model FacilityBilling {
+  id              String   @id @default(uuid())
+  facilityId      String   @unique
+  billingName     String
+  billingEmail    String
+  billingPhone    String?
+  addressLine1    String
+  city            String
+  state           String
+  zipCode         String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  facility        Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+}
+
+model FacilityMember {
+  id              String   @id @default(uuid())
+  facilityId      String
+  userId          String   @unique
+  firstName       String
+  lastName        String
+  jobTitle        String?
+  officePhone     String?
+  permissionsMask Json?    // granular toggle map
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  facility        Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([facilityId])
+}
+
+model WorkplaceRequirement {
+  id             String           @id @default(uuid())
+  facilityId     String
+  credentialType CredentialType
+  customLabel    String?
+  isMandatory    Boolean          @default(true)
+  appliesToRoles NurseDesignation[]
+  notes          String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  facility       Facility         @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+
+  @@unique([facilityId, credentialType])
+}
+
+model StaffingPreference {
+  id                  String             @id @default(uuid())
+  facilityId          String             @unique
+  preferredDesignations NurseDesignation[]
+  genderPreference    String?            // any | male | female
+  maxRadiusMiles      Float?
+  autoApproveBookings Boolean            @default(false)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  facility            Facility           @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+}
+
+model FacilityNotificationPref {
+  id                    String   @id @default(uuid())
+  facilityId            String   @unique
+  emailOnNewBooking     Boolean  @default(true)
+  emailOnCancellation   Boolean  @default(true)
+  emailOnVisitComplete  Boolean  @default(true)
+  smsOnEmergencyFill    Boolean  @default(false)
+  pushEnabled           Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  facility              Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────
+// CASES & SHIFTS
+// ─────────────────────────────────────────────
+
+model Case {
+  id               String     @id @default(uuid())
+  facilityId       String
+  publicIdentifier String     @unique // Case-PT-XXXX
+  patientFirstName String?    // encrypted / masked
+  patientLastName  String?
+  dateOfBirth      DateTime?
+  gender           String?
+  primaryDiagnosis String?
+  notes            String?
+
+  addressLine1     String
+  addressLine2     String?
+  city             String
+  state            String
+  zipCode          String
+  latitude         Float?
+  longitude        Float?
+
+  isOasisCase      Boolean    @default(false)
+  oasisType        OasisType?
+
+  visitType        VisitType
+  specialties      String[]   // array of specialty codes
+
+  isActive         Boolean    @default(true)
+  createdById      String?
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  deletedAt        DateTime?
+
+  facility         Facility   @relation(fields: [facilityId], references: [id])
+  shifts           Shift[]
+
+  @@index([facilityId])
+  @@index([publicIdentifier])
+}
+
+model Shift {
+  id                String        @id @default(uuid())
+  caseId            String
+  facilityId        String
+  title             String?
+  description       String?
+
+  visitType         VisitType
+  requiredDesignation NurseDesignation
+  specialties       String[]
+
+  pattern           ShiftPattern  @default(ONE_TIME)
+  period            ShiftPeriod   @default(DAY)
+  scheduledStart    DateTime
+  scheduledEnd      DateTime
+  estimatedDuration Int?          // minutes
+  recurringDays     Int[]         // 0=Sun ... 6=Sat
+  recurringEndDate  DateTime?
+
+  status            ShiftStatus   @default(OPEN)
+  isUrgent          Boolean       @default(false)
+  isEmergencyFill   Boolean       @default(false)
+  allowInstantBook  Boolean       @default(true)
+
+  chargeRate        Decimal       @db.Decimal(10, 2)
+  payRate           Decimal       @db.Decimal(10, 2)
+  billingType       String        @default("HOURLY")
+
+  genderPreference  String?
+  internalNotes     String?
+  cancelReason      String?
+  cancelledAt       DateTime?
+  cancelledById     String?
+
+  createdById       String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  case              Case          @relation(fields: [caseId], references: [id])
+  assignments       ShiftAssignment[]
+
+  @@index([caseId])
+  @@index([facilityId])
+  @@index([status])
+  @@index([scheduledStart])
+}
+
+model ShiftAssignment {
+  id              String           @id @default(uuid())
+  shiftId         String
+  nurseProfileId  String
+  status          AssignmentStatus @default(PENDING)
+  assignedById    String?          // null = self-book, set = manual by admin/facility
+  acceptedAt      DateTime?
+  rejectedAt      DateTime?
+  rejectionReason String?
+  cancelledAt     DateTime?
+  cancelReason    String?
+  completedAt     DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  shift           Shift            @relation(fields: [shiftId], references: [id])
+  nurseProfile    NurseProfile     @relation(fields: [nurseProfileId], references: [id])
+  visit           Visit?
+
+  @@unique([shiftId, nurseProfileId])
+  @@index([nurseProfileId])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────
+// VISIT VERIFICATION (EVV)
+// ─────────────────────────────────────────────
+
+model Visit {
+  id                 String      @id @default(uuid())
+  assignmentId       String      @unique
+  nurseProfileId     String
+  shiftId            String
+
+  status             VisitStatus @default(SCHEDULED)
+
+  checkInTime        DateTime?
+  checkInLatitude    Float?
+  checkInLongitude   Float?
+  checkInDistance    Float?      // meters from case address
+  checkInIpAddress   String?
+  checkInQrCode      String?
+
+  checkOutTime       DateTime?
+  checkOutLatitude   Float?
+  checkOutLongitude  Float?
+  checkOutDistance   Float?
+  checkOutIpAddress  String?
+
+  durationMinutes    Int?
+  signatureUrl       String?
+
+  overrideRequired   Boolean     @default(false)
+  overrideReason     String?
+  overrideApprovedById String?
+  overrideApprovedAt DateTime?
+
+  notes              String?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  assignment         ShiftAssignment @relation(fields: [assignmentId], references: [id])
+  nurseProfile       NurseProfile    @relation(fields: [nurseProfileId], references: [id])
+  auditEvents        VisitAuditLog[]
+
+  @@index([nurseProfileId])
+  @@index([shiftId])
+  @@index([status])
+}
+
+model VisitAuditLog {
+  id         String   @id @default(uuid())
+  visitId    String
+  action     String
+  performedById String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  visit      Visit    @relation(fields: [visitId], references: [id])
+}
+
+// ─────────────────────────────────────────────
+// MESSAGING
+// ─────────────────────────────────────────────
+
+model Conversation {
+  id           String    @id @default(uuid())
+  participantIds String[] // user IDs
+  facilityId   String?
+  lastMessageAt DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  messages     Message[]
+}
+
+model Message {
+  id             String        @id @default(uuid())
+  conversationId String
+  senderId       String
+  content        String?
+  attachmentUrl  String?
+  attachmentKey  String?
+  attachmentType String?
+  status         MessageStatus @default(SENT)
+  readAt         DateTime?
+  createdAt      DateTime      @default(now())
+
+  conversation   Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User          @relation("SentMessages", fields: [senderId], references: [id])
+
+  @@index([conversationId])
+  @@index([senderId])
+}
+
+// ─────────────────────────────────────────────
+// NOTIFICATIONS
+// ─────────────────────────────────────────────
+
+model Notification {
+  id         String              @id @default(uuid())
+  userId     String
+  type       NotificationType
+  channel    NotificationChannel
+  title      String
+  body       String
+  data       Json?
+  isRead     Boolean             @default(false)
+  readAt     DateTime?
+  sentAt     DateTime?
+  createdAt  DateTime            @default(now())
+
+  user       User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([type])
+}
+
+// ─────────────────────────────────────────────
+// BILLING & PAYMENTS
+// ─────────────────────────────────────────────
+
+model Wallet {
+  id              String       @id @default(uuid())
+  nurseProfileId  String       @unique
+  pendingBalance  Decimal      @default(0) @db.Decimal(10, 2)
+  availableBalance Decimal     @default(0) @db.Decimal(10, 2)
+  lifetimeEarnings Decimal     @default(0) @db.Decimal(10, 2)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  nurseProfile    NurseProfile @relation(fields: [nurseProfileId], references: [id], onDelete: Cascade)
+  payouts         Payout[]
+}
+
+model Payout {
+  id               String       @id @default(uuid())
+  nurseProfileId   String
+  walletId         String
+  shiftId          String?
+  grossCharge      Decimal      @db.Decimal(10, 2)
+  netPayout        Decimal      @db.Decimal(10, 2)
+  systemCommission Decimal      @db.Decimal(10, 2)
+  stripeTransferId String?
+  status           PayoutStatus @default(PENDING)
+  notes            String?
+  paidAt           DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  nurseProfile     NurseProfile @relation(fields: [nurseProfileId], references: [id])
+  wallet           Wallet       @relation(fields: [walletId], references: [id])
+}
+
+model Invoice {
+  id              String        @id @default(uuid())
+  facilityId      String
+  invoiceNumber   String        @unique
+  status          InvoiceStatus @default(DRAFT)
+  periodStart     DateTime
+  periodEnd       DateTime
+  subtotal        Decimal       @db.Decimal(10, 2)
+  tax             Decimal       @default(0) @db.Decimal(10, 2)
+  total           Decimal       @db.Decimal(10, 2)
+  stripeInvoiceId String?
+  stripePaymentIntentId String?
+  paidAt          DateTime?
+  dueAt           DateTime?
+  fileUrl         String?
+  notes           String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  facility        Facility      @relation(fields: [facilityId], references: [id])
+  lineItems       InvoiceLineItem[]
+
+  @@index([facilityId])
+  @@index([status])
+}
+
+model InvoiceLineItem {
+  id            String   @id @default(uuid())
+  invoiceId     String
+  shiftId       String?
+  description   String
+  quantity      Float
+  unitRate      Decimal  @db.Decimal(10, 2)
+  amount        Decimal  @db.Decimal(10, 2)
+  createdAt     DateTime @default(now())
+
+  invoice       Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────
+// AUDIT LOGS
+// ─────────────────────────────────────────────
+
+model AuditLog {
+  id           String      @id @default(uuid())
+  userId       String?
+  action       AuditAction
+  resource     String      // table/entity name
+  resourceId   String?
+  previousData Json?
+  newData      Json?
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime    @default(now())
+
+  user         User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([resource, resourceId])
+  @@index([createdAt])
+}
