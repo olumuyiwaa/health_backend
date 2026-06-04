@@ -30,6 +30,15 @@ const RESOURCE_TYPES = {
     USER:        'USER',
 };
 
+function normalizeEnumValue(query) {
+    return query.trim().toUpperCase().replace(/\s+/g, '_');
+}
+
+function enumFilter(query, values) {
+    const normalized = normalizeEnumValue(query);
+    return values.includes(normalized) ? normalized : null;
+}
+
 // ─── Scope resolver ───────────────────────────────────────────
 
 function resolveScope(req) {
@@ -244,11 +253,20 @@ async function searchCases(q, scope, limit) {
 }
 
 async function searchShifts(q, scope, limit) {
+    const visitType = enumFilter(q, [
+        'ADMISSION',
+        'REGULAR',
+        'RESUMPTION_OF_CARE',
+        'RECERTIFICATION',
+        'SUPERVISORY',
+        'DISCHARGE',
+    ]);
+
     const where = {
         status: { not: 'CANCELLED' },
         OR: [
             { title:       { contains: q, mode: 'insensitive' } },
-            { visitType:   { contains: q, mode: 'insensitive' } },
+            ...(visitType ? [{ visitType }] : []),
             { description: { contains: q, mode: 'insensitive' } },
             { case: { publicIdentifier: { contains: q, mode: 'insensitive' } } },
             { case: { city:             { contains: q, mode: 'insensitive' } } },
@@ -315,9 +333,22 @@ async function searchCredentials(q, scope, limit) {
     // Only admins and recruiters can search credentials globally
     if (!scope.isAdmin) return [];
 
+    const credentialType = enumFilter(q, [
+        'STATE_LICENSE',
+        'CPR_CERTIFICATION',
+        'TB_TEST',
+        'BACKGROUND_CHECK',
+        'GOVERNMENT_ID',
+        'OIG_CHECK',
+        'SAM_CHECK',
+        'IMMUNIZATION',
+        'WORK_AUTHORIZATION',
+        'CUSTOM',
+    ]);
+
     const where = {
         OR: [
-            { type:        { contains: q, mode: 'insensitive' } },
+            ...(credentialType ? [{ type: credentialType }] : []),
             { customLabel: { contains: q, mode: 'insensitive' } },
             { nurseProfile: { firstName: { contains: q, mode: 'insensitive' } } },
             { nurseProfile: { lastName:  { contains: q, mode: 'insensitive' } } },
