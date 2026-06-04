@@ -479,7 +479,6 @@ router.get('/dashboard', authenticate, authorize('SUPER_ADMIN', 'RECRUITER'), as
 });
 
 // ─── Facility Dashboard Summary ───────────────
-// GET /reports/facilities/:facilityId/dashboard
 router.get('/facilities/:facilityId/dashboard', authenticate, async (req, res, next) => {
     try {
         if (['FACILITY_ADMIN', 'TEAM_MEMBER'].includes(req.user.role)) {
@@ -496,13 +495,21 @@ router.get('/facilities/:facilityId/dashboard', authenticate, async (req, res, n
             openShifts,
             shiftsFillThisWeek,
             activeCases,
-            pendingOverrides,
+            pendingOverrides, // UPDATED BELOW
             upcomingShifts,
         ] = await Promise.all([
             prisma.shift.count({ where: { facilityId: fid, status: 'OPEN' } }),
             prisma.shift.count({ where: { facilityId: fid, status: { in: ['BOOKED','COMPLETED'] }, scheduledStart: { gte: weekStart } } }),
             prisma.case.count({ where:  { facilityId: fid, isActive: true } }),
-            prisma.visit.count({ where: { overrideRequired: true, status: 'FLAGGED', shift: { facilityId: fid } } }),
+            prisma.visit.count({
+                where: {
+                    overrideRequired: true,
+                    status: 'FLAGGED',
+                    assignment: {
+                        shift: { facilityId: fid }
+                    }
+                }
+            }),
             prisma.shift.findMany({
                 where:   { facilityId: fid, status: { in: ['OPEN','BOOKED'] }, scheduledStart: { gte: new Date() } },
                 orderBy: { scheduledStart: 'asc' },

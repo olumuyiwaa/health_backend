@@ -13,5 +13,6 @@ router.use('/billing',       require('../modules/billing/billing.routes'));
 router.use('/reports',       require('../modules/reports/reports.routes'));
 router.use('/storage',       require('../modules/storage/storage.routes'));
 router.use('/calendar',      require('../modules/calendar/calendar.routes'));
+router.use('/search',        require('../modules/search/search.routes'));
 
 module.exports = router;
