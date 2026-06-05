@@ -15,12 +15,12 @@ function setupSwagger(app) {
   }
 
   const swaggerOptions = {
-    customSiteTitle: 'Healthcare Staffing API Docs',
+    customSiteTitle: 'Trabajo hub API Docs',
     customCss: `
       .swagger-ui .topbar { background-color: #0f2942; }
       .swagger-ui .topbar-wrapper img { content: none; }
       .swagger-ui .topbar-wrapper::after {
-        content: 'Healthcare Staffing Platform';
+        content: 'Trabajo hub';
         color: #d4a843;
         font-size: 18px;
         font-weight: 700;

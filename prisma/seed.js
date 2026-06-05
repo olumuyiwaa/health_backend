@@ -1,6 +1,6 @@
 // prisma/seed.js
 // ─────────────────────────────────────────────────────────
-// Healthcare Staffing Platform — Full Test Data Seed
+// Trabajo hub Platform — Full Test Data Seed
 // Run: node prisma/seed.js  OR  npm run seed
 // ─────────────────────────────────────────────────────────
 require('dotenv').config();
@@ -914,7 +914,7 @@ async function seedAuditLogs(userMap) {
 
 async function main() {
   console.log(`\n${c.bold}${c.cyan}╔══════════════════════════════════════════════╗${c.reset}`);
-  console.log(`${c.bold}${c.cyan}║  Healthcare Staffing Platform — DB Seed     ║${c.reset}`);
+  console.log(`${c.bold}${c.cyan}║  Trabajo hub Platform — DB Seed     ║${c.reset}`);
   console.log(`${c.bold}${c.cyan}╚══════════════════════════════════════════════╝${c.reset}\n`);
 
   info('Clearing existing data…');

@@ -1,7 +1,7 @@
 {
-  "name": "healthcare-staffing-api",
+  "name": "trabajo-hub-api",
   "version": "1.0.0",
-  "description": "On-Demand Healthcare Staffing & Visit Management Platform API",
+  "description": "On-Demand Trabajo hub & Visit Management Platform API",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",

@@ -574,4 +574,63 @@ router.get('/summary', authenticate, authorize('FACILITY_ADMIN', 'SUPER_ADMIN'),
     }
 });
 
+router.patch(
+    '/payouts/:id/retry',
+    authenticate,
+    authorize('SUPER_ADMIN'),
+    async (req, res, next) => {
+        try {
+            const stripe = getStripe();
+
+            // Perform the check and Stripe call inside a transaction
+            const result = await prisma.$transaction(async (tx) => {
+                // 1. Check if it's still pending
+                const payout = await tx.payout.findUnique({
+                    where: { id: req.params.id },
+                    include: { nurseProfile: true }
+                });
+
+                if (!payout || payout.status !== 'PENDING') {
+                    throw new Error('ALREADY_PROCESSED');
+                }
+
+                if (!payout.nurseProfile.stripeAccountId) {
+                    throw new Error('NO_STRIPE_ACCOUNT');
+                }
+
+                // 2. Attempt Stripe Transfer with Idempotency Key
+                // The Idempotency Key is your primary defense against double-spending
+                const transfer = await stripe.transfers.create({
+                    amount: Math.round(parseFloat(payout.netPayout) * 100),
+                    currency: 'usd',
+                    destination: payout.nurseProfile.stripeAccountId,
+                    metadata: { payoutId: payout.id },
+                }, {
+                    idempotencyKey: `retry-payout-${payout.id}`,
+                });
+
+                // 3. Update to SETTLED
+                return await tx.payout.update({
+                    where: { id: payout.id },
+                    data: {
+                        status: 'SETTLED',
+                        stripeTransferId: transfer.id,
+                        paidAt: new Date(),
+                    },
+                });
+            });
+
+            return successResponse(res, result, 'Payment successful');
+        } catch (err) {
+            if (err.message === 'ALREADY_PROCESSED') {
+                return errorResponse(res, 'Payout already processed or not found', 400);
+            }
+            if (err.message === 'NO_STRIPE_ACCOUNT') {
+                return errorResponse(res, 'Nurse has not linked Stripe account', 400);
+            }
+            next(err);
+        }
+    }
+);
+
 module.exports = router;

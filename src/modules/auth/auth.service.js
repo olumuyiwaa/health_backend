@@ -220,7 +220,7 @@ async function setup2FA(userId) {
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
 
     const secret = speakeasy.generateSecret({
-        name:   `HealthcareApp (${user.email})`,
+        name:   `Trabajo hub (${user.email})`,
         length: 20,
     });
 

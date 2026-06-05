@@ -40,7 +40,6 @@ function enumFilter(query, values) {
 }
 
 // ─── Scope resolver ───────────────────────────────────────────
-
 function resolveScope(req) {
     const { role, facilityMember, nurseProfile } = req.user;
     return {

@@ -1,9 +1,9 @@
 openapi: 3.0.3
 
 info:
-  title: Healthcare Staffing Platform API Doc
+  title: Trabajo hub Platform API Doc
   description: |
-    On-Demand Healthcare Staffing & Visit Management Portal — REST API.
+    On-Demand Trabajo hub & Visit Management Portal — REST API.
 
     ## Authentication
     All protected endpoints require a **Bearer JWT** in the `Authorization` header:

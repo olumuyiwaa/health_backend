@@ -1,6 +1,6 @@
-# Healthcare Staffing Platform — Backend API
+# Trabajo hub Platform — Backend API
 
-> On-Demand Healthcare Staffing & Visit Management Portal  
+> On-Demand Trabajo hub & Visit Management Portal  
 > Designed for **Qudus Elite LLC** · Built with Node.js · REST API
 
 ---
@@ -45,7 +45,7 @@
 
 ## Overview
 
-This is the backend API for a multi-tenant, on-demand healthcare staffing marketplace. It connects certified healthcare professionals (nurses, CNAs, HHAs) with commercial healthcare facilities (home care agencies, skilled nursing facilities, hospitals).
+This is the backend API for a multi-tenant, on-demand Trabajo hub marketplace. It connects certified healthcare professionals (nurses, CNAs, HHAs) with commercial healthcare facilities (home care agencies, skilled nursing facilities, hospitals).
 
 The system handles the full lifecycle of a clinical engagement:
 
@@ -111,7 +111,7 @@ Visit completed → EVV audit trail generated → Invoice created → Payout pro
 ## Project Structure
 
 ```
-healthcare-api/
+Trabajo hub-api/
 ├── prisma/
 │   └── schema.prisma          # Full database schema (24 models)
 ├── src/
@@ -189,8 +189,8 @@ Each shift specifies a `requiredDesignation`. Nurses can only book shifts that m
 ### Installation
 
 ```bash
-git clone https://github.com/your-org/healthcare-staffing-api.git
-cd healthcare-staffing-api
+git clone https://github.com/your-org/trabajo-hub-api.git
+cd trabajo-hub-api
 npm install
 ```
 
@@ -716,8 +716,8 @@ npm run studio        # Open Prisma Studio on localhost:5555
 # 2. Install Node.js 18+, PostgreSQL, Redis
 
 # 3. Clone and install
-git clone https://github.com/your-org/healthcare-staffing-api.git
-cd healthcare-staffing-api
+git clone https://github.com/your-org/trabajo-hub-api.git
+cd trabajo-hub-api
 npm ci --omit=dev
 
 # 4. Set environment variables
@@ -729,7 +729,7 @@ npm run migrate
 
 # 6. Start with a process manager
 npm install -g pm2
-pm2 start src/server.js --name healthcare-api
+pm2 start src/server.js --name trabajo-hub-api
 pm2 save
 pm2 startup
 ```

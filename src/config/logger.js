@@ -24,7 +24,7 @@ const errorFileTransport = new transports.DailyRotateFile({
 const logger = createLogger({
     level:  process.env.LOG_LEVEL || 'info',
     format: combine(timestamp(), errors({ stack: true }), json()),
-    defaultMeta: { service: 'healthcare-api' },
+    defaultMeta: { service: 'trabajo-hub-api' },
     transports: [fileTransport, errorFileTransport],
 });
 
