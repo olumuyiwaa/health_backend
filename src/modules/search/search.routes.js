@@ -419,7 +419,7 @@ async function searchInvoices(q, scope, limit) {
         subtitle: `${inv.facility.name} · $${Number(inv.total).toFixed(2)}`,
         status:   inv.status,
         badge:    'Invoice',
-        url:      `/billing/invoices/${inv.id}`,
+        url:      `/bill-management/invoices/${inv.id}`,
         meta: {
             total:        inv.total,
             dueAt:        inv.dueAt,

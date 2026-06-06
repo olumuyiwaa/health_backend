@@ -49,6 +49,90 @@ router.get('/', authenticate, authorize('SUPER_ADMIN', 'RECRUITER'),
     }
 );
 
+router.get('/chat', authenticate,
+    async (req, res, next) => {
+        try {
+            const { page = 1, limit = 20, search } = req.query;
+            const skip = (Number(page) - 1) * Number(limit);
+
+            const requesterId = req.user.id;
+            const requesterRole = req.user.role;
+            const requesterFacilityId = req.user.facilityMember?.facilityId;
+
+            // --- Define Visibility Logic ---
+
+            // 1. Everyone can see SUPER_ADMIN and RECRUITER
+            let roleFilters = [{ role: 'SUPER_ADMIN' }, { role: 'RECRUITER' }];
+
+            if (requesterRole === 'NURSE') {
+                // Nurses: Can ONLY see Super Admins, Recruiters, and other Nurses
+                // (They cannot see Facility Admins or Facility Members)
+                roleFilters.push({ role: 'NURSE' });
+            }
+            else if (requesterRole === 'FACILITY_ADMIN' || requesterRole === 'TEAM_MEMBER') {
+                // Facility users: Can see Super Admins, Recruiters, and Nurses
+                roleFilters.push({ role: 'NURSE' });
+
+                // Restriction: Can only see Facility Admins/Members from their SAME facility
+                if (requesterFacilityId) {
+                    roleFilters.push({
+                        OR: [
+                            { role: 'FACILITY_ADMIN', facilityMember: { facilityId: requesterFacilityId } },
+                            { role: 'TEAM_MEMBER', facilityMember: { facilityId: requesterFacilityId } }
+                        ]
+                    });
+                }
+            }
+            else if (requesterRole === 'SUPER_ADMIN' || requesterRole === 'RECRUITER') {
+                // System Admins: Can see everyone
+                roleFilters = []; // No restrictions
+            }
+
+            const where = {
+                // Combine the role/facility restrictions
+                ...(roleFilters.length > 0 ? { OR: roleFilters } : {}),
+
+                // Exclude the requester themselves from the search
+                id: { not: requesterId },
+
+                // Search functionality
+                ...(search ? {
+                    AND: [
+                        {
+                            OR: [
+                                { email: { contains: search, mode: 'insensitive' } },
+                                { adminProfile: { OR: [{ firstName: { contains: search, mode: 'insensitive' } }, { lastName: { contains: search, mode: 'insensitive' } }] } },
+                                { nurseProfile: { OR: [{ firstName: { contains: search, mode: 'insensitive' } }, { lastName: { contains: search, mode: 'insensitive' } }] } },
+                                { facilityMember: { OR: [{ firstName: { contains: search, mode: 'insensitive' } }, { lastName: { contains: search, mode: 'insensitive' } }] } },
+                            ]
+                        }
+                    ]
+                } : {}),
+                deletedAt: null,
+                status: 'ACTIVE' // Usually you only want to chat with active users
+            };
+
+            const [users, total] = await Promise.all([
+                prisma.user.findMany({
+                    where,
+                    skip: Number(skip),
+                    take: Number(limit),
+                    orderBy: { createdAt: 'desc' },
+                    select: {
+                        id: true, email: true, role: true, status: true,
+                        adminProfile:  { select: { firstName: true, lastName: true } },
+                        nurseProfile:  { select: { firstName: true, lastName: true, designation: true } },
+                        facilityMember:{ select: { firstName: true, lastName: true, facilityId: true, jobTitle: true } },
+                    },
+                }),
+                prisma.user.count({ where }),
+            ]);
+
+            return paginatedResponse(res, users, buildPagination(page, limit, total));
+        } catch (err) { next(err); }
+    }
+);
+
 // GET /users/me — current user profile
 router.get('/me', authenticate, async (req, res, next) => {
     try {

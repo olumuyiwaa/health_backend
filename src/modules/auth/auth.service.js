@@ -269,10 +269,9 @@ async function refreshTokens(refreshToken, req) {
     const { accessToken, refreshToken: newRefreshToken } = buildTokenPair(user);
 
     // Rotate refresh token
-    await prisma.$transaction([
-        prisma.session.update({ where: { id: session.id }, data: { isActive: false, revokedAt: new Date() } }),
-        prisma.session.create({ data: { ...buildSession(user.id, req), token: newRefreshToken } }),
-    ]);
+
+    await prisma.session.update({ where: { id: session.id }, data: { isActive: false, revokedAt: new Date() } });
+    await prisma.session.create({ data: { ...buildSession(user.id, req), token: newRefreshToken } });
 
     return { accessToken, refreshToken: newRefreshToken };
 }
