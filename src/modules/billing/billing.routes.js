@@ -176,11 +176,10 @@ router.patch(
     }
 );
 
-
-// GET /billing/invoices  — list invoices (scoped by role)
 router.get('/invoices', authenticate, async (req, res, next) => {
     try {
-        const { page = 1, limit = 20, facilityId, status } = req.query;
+        const { page = 1, limit = 20, facilityId, status, search } = req.query; // 👈 add search
+
         const skip = (Number(page) - 1) * Number(limit);
 
         let facilityFilter = facilityId;
@@ -191,6 +190,12 @@ router.get('/invoices', authenticate, async (req, res, next) => {
         const where = {
             ...(facilityFilter ? { facilityId: facilityFilter } : {}),
             ...(status         ? { status }                     : {}),
+            ...(search?.trim() ? {
+                invoiceNumber: {
+                    contains: search.trim(),
+                    mode: 'insensitive',
+                },
+            } : {}),
         };
 
         const [invoices, total] = await Promise.all([
@@ -200,7 +205,7 @@ router.get('/invoices', authenticate, async (req, res, next) => {
                 take:    Number(limit),
                 orderBy: { createdAt: 'desc' },
                 include: {
-                    facility:  { select: { name: true } },
+                    facility:  { select: { name: true, email: true } },
                     lineItems: true,
                 },
             }),

@@ -6,12 +6,12 @@ const { prisma } = require('../../config/database');
 const { successResponse, createdResponse, errorResponse, paginatedResponse, buildPagination } = require('../../utils/response');
 const { writeAuditLog } = require('../../utils/audit');
 const { dispatchNotification } = require('../notifications/notifications.service');
-const { randomUUID } = require("crypto");
+const crypto = require("crypto");
 
 
 // ─── Create Shift ──────────────────────────────
 function generatePublicIdentifier() {
-    return `CASE-${Date.now()}-${randomUUID().slice(0, 8).toUpperCase()}`;
+    return `Case-PT-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
 }
 router.post(
     "/",
@@ -135,83 +135,79 @@ router.post(
                 : [];
 
             const result = await prisma.$transaction(async (tx) => {
-                const createdCase = await tx.case.create({
-                    data: {
-                        facilityId: facility.id,
-                        publicIdentifier: generatePublicIdentifier(),
+                let caseId = req.body.caseId;
+                let createdCase = null;
 
-                        addressLine1: primaryAddress.addressLine1,
-                        addressLine2: primaryAddress.addressLine2,
-                        city: primaryAddress.city,
-                        state: primaryAddress.state,
-                        zipCode: primaryAddress.zipCode,
-                        latitude: primaryAddress.latitude,
-                        longitude: primaryAddress.longitude,
+                if (caseId) {
+                    const existingCase = await tx.case.findUnique({
+                        where: { id: caseId },
+                        select: { id: true, facilityId: true, isActive: true },
+                    });
 
-                        visitType: req.body.visitType,
-                        specialties,
-
-                        isActive: true,
-                        createdById: req.user.id,
-                    },
-                });
+                    if (!existingCase) throw Object.assign(new Error("Case not found"), { statusCode: 404 });
+                    if (existingCase.facilityId !== facilityId) throw Object.assign(new Error("Case does not belong to this facility"), { statusCode: 403 });
+                    if (!existingCase.isActive) throw Object.assign(new Error("Case is not active"), { statusCode: 400 });
+                } else {
+                    createdCase = await tx.case.create({
+                        data: {
+                            facilityId: facility.id,
+                            publicIdentifier: generatePublicIdentifier(),
+                            addressLine1: primaryAddress.addressLine1,
+                            addressLine2: primaryAddress.addressLine2,
+                            city: primaryAddress.city,
+                            state: primaryAddress.state,
+                            zipCode: primaryAddress.zipCode,
+                            latitude: primaryAddress.latitude,
+                            longitude: primaryAddress.longitude,
+                            visitType: req.body.visitType,
+                            specialties,
+                            isActive: true,
+                            createdById: req.user.id,
+                        },
+                    });
+                    caseId = createdCase.id;
+                }
 
                 const shift = await tx.shift.create({
                     data: {
-                        caseId: createdCase.id,
+                        caseId,
                         facilityId: facility.id,
-
                         title: req.body.title || null,
                         description: req.body.description || null,
-
                         visitType: req.body.visitType,
                         requiredDesignation: req.body.requiredDesignation,
                         specialties,
-
                         pattern: req.body.pattern || "ONE_TIME",
                         period: req.body.period || "DAY",
-
                         scheduledStart,
                         scheduledEnd,
-                        estimatedDuration: req.body.estimatedDuration
-                            ? Number(req.body.estimatedDuration)
-                            : null,
-
+                        estimatedDuration: req.body.estimatedDuration ? Number(req.body.estimatedDuration) : null,
                         recurringDays,
-                        recurringEndDate: req.body.recurringEndDate
-                            ? new Date(req.body.recurringEndDate)
-                            : null,
-
+                        recurringEndDate: req.body.recurringEndDate ? new Date(req.body.recurringEndDate) : null,
                         chargeRate: parseFloat(req.body.chargeRate),
                         payRate: parseFloat(req.body.payRate),
                         billingType: req.body.billingType || "HOURLY",
-
                         isUrgent: Boolean(req.body.isUrgent),
                         isEmergencyFill: Boolean(req.body.isEmergencyFill),
-                        allowInstantBook:
-                            typeof req.body.allowInstantBook === "boolean"
-                                ? req.body.allowInstantBook
-                                : true,
-
+                        allowInstantBook: typeof req.body.allowInstantBook === "boolean" ? req.body.allowInstantBook : true,
                         internalNotes: req.body.internalNotes || null,
                         createdById: req.user.id,
                     },
-                    include: {
-                        case: true,
-                        assignments: true,
-                    },
+                    include: { case: true, assignments: true },
                 });
 
                 return { createdCase, shift };
             });
 
-            await writeAuditLog({
-                userId: req.user.id,
-                action: "CREATE",
-                resource: "Case",
-                resourceId: result.createdCase.id,
-                req,
-            });
+            if (result.createdCase) {
+                await writeAuditLog({
+                    userId: req.user.id,
+                    action: "CREATE",
+                    resource: "Case",
+                    resourceId: result.createdCase.id,
+                    req,
+                });
+            }
 
             await writeAuditLog({
                 userId: req.user.id,
