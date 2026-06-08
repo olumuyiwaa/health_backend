@@ -78,14 +78,14 @@ router.get('/revenue', authenticate, authorize('SUPER_ADMIN'), async (req, res, 
         const { gte, lte } = dateRange(from, to);
 
         const [payoutTotals, invoiceTotals, byMonth, byFacility] = await Promise.all([
-            // Payouts (existing)
+            // Payouts
             prisma.payout.aggregate({
                 where: { createdAt: { gte, lte }, status: 'SETTLED' },
                 _sum: { grossCharge: true, netPayout: true, systemCommission: true },
                 _count: { id: true },
             }),
 
-            // New: Revenue from Invoices
+            // Invoices Aggregate
             prisma.invoice.aggregate({
                 where: {
                     createdAt: { gte, lte },
@@ -95,13 +95,13 @@ router.get('/revenue', authenticate, authorize('SUPER_ADMIN'), async (req, res, 
                 _count: { id: true },
             }),
 
-            // Revenue by Month (from Invoices - better data source)
+            // Revenue by Month
             prisma.$queryRaw`
                 SELECT
                     TO_CHAR(DATE_TRUNC('month', "createdAt"), 'YYYY-MM') AS month,
-                  SUM("subtotal")::NUMERIC(12,2)     AS "grossRevenue",
-                  SUM("total")::NUMERIC(12,2)        AS "totalInvoiced",
-                  COUNT(id)                          AS "invoiceCount"
+                    SUM("subtotal")::NUMERIC(12,2)     AS "grossRevenue",
+                    SUM("total")::NUMERIC(12,2)        AS "totalInvoiced",
+                    COUNT(id)                          AS "invoiceCount"
                 FROM "Invoice"
                 WHERE "createdAt" >= ${gte}
                   AND "createdAt" <= ${lte}
@@ -110,7 +110,7 @@ router.get('/revenue', authenticate, authorize('SUPER_ADMIN'), async (req, res, 
                 ORDER BY month ASC
             `,
 
-            // Keep existing byFacility or improve later
+            // FIXED: By Facility
             prisma.$queryRaw`
                 SELECT
                     f.id            AS "facilityId",
@@ -135,6 +135,13 @@ router.get('/revenue', authenticate, authorize('SUPER_ADMIN'), async (req, res, 
             invoiceCount: Number(m.invoiceCount || 0),
         }));
 
+        const safeByFacility = (byFacility || []).map((f) => ({
+            facilityId: f.facilityId,
+            facilityName: f.facilityName,
+            invoiceCount: Number(f.invoiceCount || 0),
+            totalRevenue: Number(f.totalRevenue || 0),
+        }));
+
         return successResponse(res, {
             period: { from: gte, to: lte },
             totals: {
@@ -144,7 +151,7 @@ router.get('/revenue', authenticate, authorize('SUPER_ADMIN'), async (req, res, 
                 settledPayouts: Number(payoutTotals._count.id || 0),
                 totalInvoices: Number(invoiceTotals._count.id || 0),
             },
-            byFacility: [], // can enhance later
+            byFacility: safeByFacility,     // ← Now properly populated
             byMonth: safeByMonth,
         });
     } catch (err) {
