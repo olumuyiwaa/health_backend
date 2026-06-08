@@ -2,6 +2,7 @@ const router = require('express').Router();
 const { authenticate, authorize } = require('../../middleware/authenticate');
 const { prisma } = require('../../config/database');
 const { successResponse, errorResponse } = require('../../utils/response');
+const { Prisma } = require('@prisma/client');
 
 // ─── Helpers ───────────────────────────────────
 
@@ -71,82 +72,84 @@ router.get('/shifts', authenticate, async (req, res, next) => {
 
 // ─── Revenue Dashboard ─────────────────────────
 // GET /reports/revenue
-// Returns: gross revenue, net payouts, commission, by facility, by month
 router.get('/revenue', authenticate, authorize('SUPER_ADMIN'), async (req, res, next) => {
     try {
         const { from, to } = req.query;
         const { gte, lte } = dateRange(from, to);
 
-        const [totals, byFacility, byMonth] = await Promise.all([
-            // Overall payout totals
+        const [payoutTotals, invoiceTotals, byMonth, byFacility] = await Promise.all([
+            // Payouts (existing)
             prisma.payout.aggregate({
-                where:   { createdAt: { gte, lte }, status: 'SETTLED' },
-                _sum:    { grossCharge: true, netPayout: true, systemCommission: true },
-                _count:  { id: true },
+                where: { createdAt: { gte, lte }, status: 'SETTLED' },
+                _sum: { grossCharge: true, netPayout: true, systemCommission: true },
+                _count: { id: true },
             }),
 
-            // Revenue per facility (via shifts → cases → facility)
-            prisma.$queryRaw`
-        SELECT
-          f.id            AS "facilityId",
-          f.name          AS "facilityName",
-          COUNT(s.id)     AS "shiftCount",
-          SUM(s."chargeRate" * EXTRACT(EPOCH FROM (s."scheduledEnd" - s."scheduledStart")) / 3600)::NUMERIC(12,2) AS "estimatedRevenue"
-        FROM "Shift" s
-        JOIN "Case" c  ON c.id = s."caseId"
-        JOIN "Facility" f ON f.id = c."facilityId"
-        WHERE s.status = 'COMPLETED'
-          AND s."scheduledStart" >= ${gte}
-          AND s."scheduledStart" <= ${lte}
-        GROUP BY f.id, f.name
-        ORDER BY "estimatedRevenue" DESC
-        LIMIT 10
-      `,
+            // New: Revenue from Invoices
+            prisma.invoice.aggregate({
+                where: {
+                    createdAt: { gte, lte },
+                    status: { in: ['PAID', 'ISSUED'] }
+                },
+                _sum: { subtotal: true, tax: true, total: true },
+                _count: { id: true },
+            }),
 
-            // Revenue by month
+            // Revenue by Month (from Invoices - better data source)
             prisma.$queryRaw`
-        SELECT
-          TO_CHAR(DATE_TRUNC('month', "createdAt"), 'YYYY-MM') AS month,
-          SUM("grossCharge")::NUMERIC(12,2)     AS "grossRevenue",
-          SUM("netPayout")::NUMERIC(12,2)       AS "netPayouts",
-          SUM("systemCommission")::NUMERIC(12,2) AS "commission",
-          COUNT(id)                              AS "payoutCount"
-        FROM "Payout"
-        WHERE status = 'SETTLED'
-          AND "createdAt" >= ${gte}
-          AND "createdAt" <= ${lte}
-        GROUP BY DATE_TRUNC('month', "createdAt")
-        ORDER BY month ASC
-      `,
+                SELECT
+                    TO_CHAR(DATE_TRUNC('month', "createdAt"), 'YYYY-MM') AS month,
+                  SUM("subtotal")::NUMERIC(12,2)     AS "grossRevenue",
+                  SUM("total")::NUMERIC(12,2)        AS "totalInvoiced",
+                  COUNT(id)                          AS "invoiceCount"
+                FROM "Invoice"
+                WHERE "createdAt" >= ${gte}
+                  AND "createdAt" <= ${lte}
+                  AND status IN ('PAID', 'ISSUED')
+                GROUP BY DATE_TRUNC('month', "createdAt")
+                ORDER BY month ASC
+            `,
+
+            // Keep existing byFacility or improve later
+            prisma.$queryRaw`
+                SELECT
+                    f.id            AS "facilityId",
+                    f.name          AS "facilityName",
+                    COUNT(i.id)     AS "invoiceCount",
+                    SUM(i."total")::NUMERIC(12,2) AS "totalRevenue"
+                FROM "Invoice" i
+                         JOIN "Facility" f ON f.id = i."facilityId"
+                WHERE i."createdAt" >= ${gte}
+                  AND i."createdAt" <= ${lte}
+                  AND i.status IN ('PAID', 'ISSUED')
+                GROUP BY f.id, f.name
+                ORDER BY "totalRevenue" DESC
+                    LIMIT 10
+            `,
         ]);
 
         const safeByMonth = (byMonth || []).map((m) => ({
             month: m.month,
             grossRevenue: Number(m.grossRevenue || 0),
-            netPayouts: Number(m.netPayouts || 0),
-            commission: Number(m.commission || 0),
-            payoutCount: Number(m.payoutCount || 0),
-        }));
-
-        const safeByFacility = (byFacility || []).map((f) => ({
-            facilityId: f.facilityId,
-            facilityName: f.facilityName,
-            shiftCount: Number(f.shiftCount || 0),
-            estimatedRevenue: Number(f.estimatedRevenue || 0),
+            totalInvoiced: Number(m.totalInvoiced || 0),
+            invoiceCount: Number(m.invoiceCount || 0),
         }));
 
         return successResponse(res, {
             period: { from: gte, to: lte },
             totals: {
-                grossRevenue: Number(totals._sum.grossCharge || 0),
-                netPayouts: Number(totals._sum.netPayout || 0),
-                systemCommission: Number(totals._sum.systemCommission || 0),
-                settledPayouts: Number(totals._count.id || 0),
+                grossRevenue: Number(invoiceTotals._sum.total || 0),
+                netPayouts: Number(payoutTotals._sum.netPayout || 0),
+                systemCommission: Number(payoutTotals._sum.systemCommission || 0),
+                settledPayouts: Number(payoutTotals._count.id || 0),
+                totalInvoices: Number(invoiceTotals._count.id || 0),
             },
-            byFacility: safeByFacility,
+            byFacility: [], // can enhance later
             byMonth: safeByMonth,
         });
-    } catch (err) { next(err); }
+    } catch (err) {
+        next(err);
+    }
 });
 
 // ─── Facility Performance ─────────────────────
@@ -164,43 +167,55 @@ router.get('/facilities/:facilityId/performance', authenticate, async (req, res,
         const { gte, lte } = dateRange(from, to);
         const fid = req.params.facilityId;
 
-        const [shiftStats, visitStats, topNurses, caseCount] = await Promise.all([
+        const [shiftStats, visitStats, topNursesRaw, caseCount] = await Promise.all([
             prisma.shift.groupBy({
                 by:    ['status'],
                 where: { facilityId: fid, scheduledStart: { gte, lte } },
                 _count: { id: true },
             }),
 
+            // FIXED: Use assignment.shift instead of direct shift
             prisma.visit.aggregate({
                 where: {
-                    shift: { facilityId: fid, scheduledStart: { gte, lte } },
                     status: 'CHECKED_OUT',
+                    assignment: {
+                        shift: {
+                            facilityId: fid,
+                            scheduledStart: { gte, lte }
+                        }
+                    }
                 },
                 _avg:   { durationMinutes: true },
                 _count: { id: true },
             }),
 
             prisma.$queryRaw`
-        SELECT
-          np."firstName" || ' ' || np."lastName" AS name,
-          np.designation,
-          COUNT(sa.id) AS "shiftsCompleted"
-        FROM "ShiftAssignment" sa
-        JOIN "NurseProfile" np ON np.id = sa."nurseProfileId"
-        JOIN "Shift" s         ON s.id  = sa."shiftId"
-        WHERE s."facilityId" = ${fid}
-          AND sa.status      = 'COMPLETED'
-          AND s."scheduledStart" >= ${gte}
-          AND s."scheduledStart" <= ${lte}
-        GROUP BY np.id, np."firstName", np."lastName", np.designation
-        ORDER BY "shiftsCompleted" DESC
-        LIMIT 5
-      `,
+                SELECT
+                    np."firstName" || ' ' || np."lastName" AS name,
+                    np.designation,
+                    COUNT(sa.id) AS "shiftsCompleted"
+                FROM "ShiftAssignment" sa
+                         JOIN "NurseProfile" np ON np.id = sa."nurseProfileId"
+                         JOIN "Shift" s         ON s.id  = sa."shiftId"
+                WHERE s."facilityId" = ${fid}
+                  AND sa.status      = 'COMPLETED'
+                  AND s."scheduledStart" >= ${gte}
+                  AND s."scheduledStart" <= ${lte}
+                GROUP BY np.id, np."firstName", np."lastName", np.designation
+                ORDER BY "shiftsCompleted" DESC
+                    LIMIT 5
+            `,
 
             prisma.case.count({ where: { facilityId: fid, isActive: true } }),
         ]);
 
         const statusMap = Object.fromEntries(shiftStats.map((s) => [s.status, s._count.id]));
+
+        const topNurses = (topNursesRaw || []).map(n => ({
+            name: n.name,
+            designation: n.designation,
+            shiftsCompleted: Number(n.shiftsCompleted || 0),
+        }));
 
         return successResponse(res, {
             period: { from: gte, to: lte },
@@ -218,46 +233,114 @@ router.get('/facilities/:facilityId/performance', authenticate, async (req, res,
             activeCases: caseCount,
             topNurses,
         });
-    } catch (err) { next(err); }
+    } catch (err) {
+        next(err);
+    }
 });
 
 // ─── Worker Activity ──────────────────────────
 // GET /reports/workers
 router.get('/workers', authenticate, authorize('SUPER_ADMIN', 'RECRUITER', 'FACILITY_ADMIN'), async (req, res, next) => {
     try {
-        const { from, to, facilityId, designation } = req.query;
+        const { from, to, facilityId, designation, limit = 50, page = 1 } = req.query;
+
         const { gte, lte } = dateRange(from, to);
         const fid = facilityScope(req, facilityId);
+        const take = Math.min(Math.max(Number(limit) || 50, 1), 100); // max 100
+        const skip = (Number(page) - 1) * take;
+
+        const facilityFilter = fid
+            ? Prisma.sql`AND s."facilityId" = ${fid}`
+            : Prisma.empty;
 
         const workers = await prisma.$queryRaw`
-      SELECT
-        np.id,
-        np."firstName" || ' ' || np."lastName" AS name,
-        np.designation,
-        u.email,
-        COUNT(CASE WHEN sa.status = 'COMPLETED' THEN 1 END) AS "completedShifts",
-        COUNT(CASE WHEN sa.status = 'CANCELLED' THEN 1 END) AS "cancelledShifts",
-        COUNT(CASE WHEN sa.status = 'ACCEPTED'  THEN 1 END) AS "upcomingShifts",
-        ROUND(AVG(v."durationMinutes"))                      AS "avgVisitMinutes",
-        SUM(p."netPayout")                                   AS "totalEarnings"
-      FROM "NurseProfile" np
-      JOIN "User" u         ON u.id  = np."userId"
-      LEFT JOIN "ShiftAssignment" sa ON sa."nurseProfileId" = np.id
-        AND sa."createdAt" >= ${gte} AND sa."createdAt" <= ${lte}
-      LEFT JOIN "Shift" s ON s.id = sa."shiftId"
-        ${fid ? prisma.$raw`AND s."facilityId" = ${fid}` : prisma.$raw``}
-      LEFT JOIN "Visit" v  ON v."assignmentId" = sa.id
-      LEFT JOIN "Payout" p ON p."nurseProfileId" = np.id
-        AND p.status = 'SETTLED'
-        AND p."createdAt" >= ${gte} AND p."createdAt" <= ${lte}
-      ${designation ? prisma.$raw`WHERE np.designation = ${designation}` : prisma.$raw``}
-      GROUP BY np.id, np."firstName", np."lastName", np.designation, u.email
-      ORDER BY "completedShifts" DESC
-      LIMIT 50
-    `;
+            SELECT
+                np.id,
+                np."firstName" || ' ' || np."lastName" AS name,
+                np.designation,
+                u.email,
+                COUNT(CASE WHEN sa.status = 'COMPLETED' THEN 1 END) AS "completedShifts",
+                COUNT(CASE WHEN sa.status = 'CANCELLED' THEN 1 END) AS "cancelledShifts",
+                COUNT(CASE WHEN sa.status = 'ACCEPTED' THEN 1 END) AS "upcomingShifts",
+                ROUND(AVG(v."durationMinutes")) AS "avgVisitMinutes",
+                COALESCE(SUM(p."netPayout"), 0) AS "totalEarnings"
+            FROM "NurseProfile" np
+            JOIN "User" u ON u.id = np."userId"
 
-        return successResponse(res, workers);
-    } catch (err) { next(err); }
+            LEFT JOIN "ShiftAssignment" sa
+                      ON sa."nurseProfileId" = np.id
+                          AND sa."createdAt" >= ${gte}
+                          AND sa."createdAt" <= ${lte}
+
+            LEFT JOIN "Shift" s
+                      ON s.id = sa."shiftId"
+            ${facilityFilter}
+
+            LEFT JOIN "Visit" v
+                      ON v."assignmentId" = sa.id
+
+            LEFT JOIN "Payout" p
+                      ON p."nurseProfileId" = np.id
+                      AND p.status = 'SETTLED'
+                      AND p."createdAt" >= ${gte}
+                      AND p."createdAt" <= ${lte}
+
+            ${designation ? Prisma.sql`WHERE np.designation = ${designation}` : Prisma.empty}
+
+            GROUP BY
+                np.id,
+                np."firstName",
+                np."lastName",
+                np.designation,
+                u.email
+
+            ORDER BY "completedShifts" DESC
+            LIMIT ${take}
+            OFFSET ${skip}
+        `;
+
+        // Convert BigInts to safe numbers
+        const safeWorkers = workers.map(w => ({
+            id: w.id,
+            name: w.name,
+            designation: w.designation,
+            email: w.email,
+            completedShifts: Number(w.completedShifts || 0),
+            cancelledShifts: Number(w.cancelledShifts || 0),
+            upcomingShifts: Number(w.upcomingShifts || 0),
+            avgVisitMinutes: Number(w.avgVisitMinutes || 0),
+            totalEarnings: Number(w.totalEarnings || 0),
+        }));
+
+        // Optional: Return total count for pagination
+        const totalResult = await prisma.$queryRaw`
+            SELECT COUNT(DISTINCT np.id) AS total
+            FROM "NurseProfile" np
+            JOIN "User" u ON u.id = np."userId"
+            LEFT JOIN "ShiftAssignment" sa ON sa."nurseProfileId" = np.id
+                AND sa."createdAt" >= ${gte} AND sa."createdAt" <= ${lte}
+            LEFT JOIN "Shift" s ON s.id = sa."shiftId"
+            ${facilityFilter}
+            ${designation ? Prisma.sql`WHERE np.designation = ${designation}` : Prisma.empty}
+        `;
+
+        const total = Number(totalResult[0]?.total || 0);
+
+        return successResponse(res, {
+            data: safeWorkers,
+            pagination: {
+                page: Number(page),
+                limit: take,
+                total,
+                totalPages: Math.ceil(total / take),
+                hasNext: Number(page) * take < total,
+                hasPrev: Number(page) > 1,
+            }
+        });
+
+    } catch (err) {
+        next(err);
+    }
 });
 
 // ─── Credential Expiry Report ─────────────────
@@ -330,16 +413,28 @@ router.get('/credentials/expiry', authenticate, authorize('SUPER_ADMIN', 'RECRUI
 // GET /reports/billing
 router.get('/billing', authenticate, authorize('SUPER_ADMIN', 'FACILITY_ADMIN'), async (req, res, next) => {
     try {
-        const { from, to, facilityId } = req.query;
+        let { from, to, facilityId } = req.query;
+
+        // Default to last 3 months if no date range is provided
+        if (!from && !to) {
+            const threeMonthsAgo = new Date();
+            threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+            from = threeMonthsAgo.toISOString();
+        }
+
         const { gte, lte } = dateRange(from, to);
-        const fid = facilityScope(req, facilityId);
+
+        let finalFacilityId = facilityId;
+        if (['FACILITY_ADMIN', 'TEAM_MEMBER'].includes(req.user.role)) {
+            finalFacilityId = req.user.facilityMember?.facilityId;
+        }
 
         const where = {
             createdAt: { gte, lte },
-            ...(fid ? { facilityId: fid } : {}),
+            ...(finalFacilityId ? { facilityId: finalFacilityId } : {}),
         };
 
-        const [invoiceSummary, byStatus, recentInvoices] = await Promise.all([
+        const [invoiceSummary, byStatus] = await Promise.all([
             prisma.invoice.aggregate({
                 where,
                 _sum:   { subtotal: true, tax: true, total: true },
@@ -352,35 +447,25 @@ router.get('/billing', authenticate, authorize('SUPER_ADMIN', 'FACILITY_ADMIN'),
                 _sum:   { total: true },
                 _count: { id: true },
             }),
-
-            prisma.invoice.findMany({
-                where,
-                orderBy: { createdAt: 'desc' },
-                take: 20,
-                select: {
-                    id: true, invoiceNumber: true, status: true,
-                    total: true, dueAt: true, paidAt: true,
-                    facility: { select: { name: true } },
-                },
-            }),
         ]);
 
         return successResponse(res, {
             period: { from: gte, to: lte },
             totals: {
-                invoiceCount: invoiceSummary._count.id,
-                subtotal:     invoiceSummary._sum.subtotal || 0,
-                tax:          invoiceSummary._sum.tax      || 0,
-                total:        invoiceSummary._sum.total    || 0,
+                invoiceCount: Number(invoiceSummary._count.id || 0),
+                subtotal:     Number(invoiceSummary._sum.subtotal || 0),
+                tax:          Number(invoiceSummary._sum.tax || 0),
+                total:        Number(invoiceSummary._sum.total || 0),
             },
             byStatus: byStatus.map((s) => ({
                 status: s.status,
-                count:  s._count.id,
-                total:  s._sum.total,
+                count:  Number(s._count.id || 0),
+                total:  Number(s._sum.total || 0),
             })),
-            recentInvoices,
         });
-    } catch (err) { next(err); }
+    } catch (err) {
+        next(err);
+    }
 });
 
 // ─── Audit Trail ──────────────────────────────
@@ -511,7 +596,26 @@ router.get('/facilities/:facilityId/dashboard', authenticate, async (req, res, n
                 }
             }),
             prisma.shift.findMany({
-                where:   { facilityId: fid, status: { in: ['OPEN','BOOKED'] }, scheduledStart: { gte: new Date() } },
+                // where:   { facilityId: fid, status: { in: ['OPEN','BOOKED'] }, scheduledStart: { gte: new Date() } },
+                where: {
+                    facilityId: fid,
+                    status: { in: ['OPEN', 'BOOKED'] },
+                    OR: [
+                        {
+                            scheduledStart: {
+                                gte: new Date(),
+                            },
+                        },
+                        {
+                            scheduledStart: {
+                                lte: new Date(),
+                            },
+                            scheduledEnd: {
+                                gte: new Date(),
+                            },
+                        },
+                    ],
+                },
                 orderBy: { scheduledStart: 'asc' },
                 take:    5,
                 include: {

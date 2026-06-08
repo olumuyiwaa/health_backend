@@ -190,58 +190,102 @@ router.patch('/:id/override-approve',
                 },
             });
 
-            await writeAuditLog({ userId: req.user.id, action: 'APPROVE', resource: 'Visit', resourceId: req.params.id, req });
+            await writeAuditLog({ userId: req.user.id, action: 'APPROVE', resource: 'Visit', resourceId: req.params.id, newData: { status: 'CHECKED_IN', overrideApprovedAt: new Date().toISOString(), approvedById: req.user.id }, req });
             return successResponse(res, visit, 'Override approved');
         } catch (err) { next(err); }
     }
 );
 
 // ─── Visit List ───────────────────────────────
-
 router.get('/', authenticate, async (req, res, next) => {
     try {
-        const { page = 1, limit = 20, facilityId, nurseProfileId, status, flaggedOnly } = req.query;
-        const skip = (page - 1) * limit;
+        const {
+            page = 1,
+            limit = 20,
+            facilityId,
+            nurseProfileId,
+            status,
+            flaggedOnly
+        } = req.query;
 
-        let npFilter = nurseProfileId;
+        const skip = (Number(page) - 1) * Number(limit);
+
+        // Role-based scoping
+        let finalNurseProfileId = nurseProfileId;
+        let finalFacilityId = facilityId;
+
         if (req.user.role === 'NURSE') {
-            const np = await prisma.nurseProfile.findUnique({ where: { userId: req.user.id }, select: { id: true } });
-            npFilter = np.id;
+            const nurseProfile = await prisma.nurseProfile.findUnique({
+                where: { userId: req.user.id },
+                select: { id: true }
+            });
+            finalNurseProfileId = nurseProfile?.id;
+        }
+
+        if (['FACILITY_ADMIN', 'TEAM_MEMBER'].includes(req.user.role)) {
+            finalFacilityId = req.user.facilityMember?.facilityId;
         }
 
         const where = {
-            ...(npFilter     ? { nurseProfileId: npFilter }        : {}),
-            ...(status       ? { status }                          : {}),
-            ...(flaggedOnly === 'true' ? { overrideRequired: true } : {}),
-            ...(facilityId   ? { assignment: { shift: { facilityId } } } : {}),
+            ...(finalNurseProfileId ? { nurseProfileId: finalNurseProfileId } : {}),
+            ...(status ? { status } : {}),
+            ...(flaggedOnly === 'true' || flaggedOnly === true ? { overrideRequired: true } : {}),
+
+            // Facility filtering through relationship
+            ...(finalFacilityId ? {
+                assignment: {
+                    shift: {
+                        facilityId: finalFacilityId
+                    }
+                }
+            } : {}),
         };
 
         const [visits, total] = await Promise.all([
             prisma.visit.findMany({
                 where,
-                skip: Number(skip),
+                skip,
                 take: Number(limit),
                 orderBy: { createdAt: 'desc' },
                 include: {
-                    nurseProfile: { select: { firstName: true, lastName: true } },
+                    nurseProfile: {
+                        select: {
+                            firstName: true,
+                            lastName: true,
+                            designation: true
+                        }
+                    },
                     assignment: {
                         include: {
                             shift: {
                                 select: {
-                                    scheduledStart: true, scheduledEnd: true, visitType: true,
-                                    case: { select: { publicIdentifier: true, city: true, state: true } },
+                                    scheduledStart: true,
+                                    scheduledEnd: true,
+                                    visitType: true,
+                                    case: {
+                                        select: {
+                                            publicIdentifier: true,
+                                            city: true,
+                                            state: true
+                                        }
+                                    },
                                 },
                             },
                         },
                     },
-                    auditEvents: { orderBy: { createdAt: 'asc' } },
+                    auditEvents: {
+                        orderBy: { createdAt: 'asc' },
+                        take: 10 // limit audit events for performance
+                    },
                 },
             }),
             prisma.visit.count({ where }),
         ]);
 
         return paginatedResponse(res, visits, buildPagination(page, limit, total));
-    } catch (err) { next(err); }
+    } catch (err) {
+        next(err);
+    }
 });
 
 // GET /visits/:id

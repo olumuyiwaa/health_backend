@@ -86,7 +86,7 @@ async function registerUser({ email, password, phone, role, firstName, lastName,
     // Send email verification OTP
     await sendEmailVerificationOtp(user.id, email);
 
-    await writeAuditLog({ userId: user.id, action: 'CREATE', resource: 'User', resourceId: user.id, req });
+    await writeAuditLog({ userId: user.id, action: 'CREATE', resource: 'User', resourceId: user.id, newData: { email: user.email, role: user.role, registeredAt: new Date().toISOString() }, req });
 
     return { id: user.id, email: user.email, role: user.role };
 }
@@ -172,7 +172,7 @@ async function completeLogin(user, req) {
         data:  { lastLoginAt: new Date(), lastLoginIp: req.ip },
     });
 
-    await writeAuditLog({ userId: user.id, action: 'LOGIN', resource: 'User', resourceId: user.id, req });
+    await writeAuditLog({ userId: user.id, action: 'LOGIN', resource: 'User', resourceId: user.id, newData: { email: user.email, role: user.role, loginAt: new Date().toISOString() }, req });
 
     return {
         accessToken,
@@ -283,7 +283,7 @@ async function logout(userId, sessionToken, req) {
         where: { userId, token: sessionToken },
         data:  { isActive: false, revokedAt: new Date() },
     });
-    await writeAuditLog({ userId, action: 'LOGOUT', resource: 'User', resourceId: userId, req });
+    await writeAuditLog({ userId, action: 'LOGOUT', resource: 'User', resourceId: userId, newData: { logoutAt: new Date().toISOString() }, req });
 }
 
 async function logoutAllDevices(userId) {

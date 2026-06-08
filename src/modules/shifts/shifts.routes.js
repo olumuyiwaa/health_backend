@@ -200,22 +200,11 @@ router.post(
             });
 
             if (result.createdCase) {
-                await writeAuditLog({
-                    userId: req.user.id,
-                    action: "CREATE",
-                    resource: "Case",
-                    resourceId: result.createdCase.id,
-                    req,
-                });
+                await writeAuditLog({ userId: req.user.id, action: 'CREATE', resource: 'Shift', resourceId: shift.id, newData: { visitType: shift.visitType, requiredDesignation: shift.requiredDesignation, status: shift.status, scheduledStart: shift.scheduledStart, facilityId: shift.facilityId }, req });
             }
 
-            await writeAuditLog({
-                userId: req.user.id,
-                action: "CREATE",
-                resource: "Shift",
-                resourceId: result.shift.id,
-                req,
-            });
+            await writeAuditLog({ userId: req.user.id, action: 'CREATE', resource: 'Shift', resourceId: shift.id, newData: { visitType: shift.visitType, requiredDesignation: shift.requiredDesignation, status: shift.status, scheduledStart: shift.scheduledStart, facilityId: shift.facilityId }, req });
+
 
             return createdResponse(res, result.shift);
         } catch (err) {
@@ -358,15 +347,15 @@ router.post('/:id/book', authenticate, authorize('NURSE'),
                 channels: ['EMAIL', 'PUSH'],
             });
 
-            await writeAuditLog({ userId: req.user.id, action: 'CREATE', resource: 'ShiftAssignment', resourceId: assignment.id, req });
+            await writeAuditLog({ userId: req.user.id, action: 'CREATE', resource: 'ShiftAssignment', resourceId: assignment.id, newData: { shiftId: assignment.shiftId, nurseProfileId: assignment.nurseProfileId, status: assignment.status }, req });
             return createdResponse(res, assignment, 'Shift booked successfully');
         } catch (err) { next(err); }
     }
 );
 
-// ─── Manual Assignment (Admin/Facility) ───────
+// ─── Manual Assignment (Admin) ───────
 
-router.post('/:id/assign', authenticate, authorize('SUPER_ADMIN', 'FACILITY_ADMIN'),
+router.post('/:id/assign', authenticate, authorize('SUPER_ADMIN'),
     [body('nurseProfileId').notEmpty()],
     validate,
     async (req, res, next) => {

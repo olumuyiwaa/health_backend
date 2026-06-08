@@ -338,7 +338,7 @@ router.patch('/:id/restore', authenticate, authorize('SUPER_ADMIN'), async (req,
             where: { id: req.params.id },
             data:  { status: 'ACTIVE' },
         });
-        await writeAuditLog({ userId: req.user.id, action: 'RESTORE', resource: 'User', resourceId: req.params.id, req });
+        await writeAuditLog({ userId: req.user.id, action: 'RESTORE', resource: 'User', resourceId: req.params.id, newData: { status: 'ACTIVE' }, req });
         return successResponse(res, {}, 'User restored');
     } catch (err) { next(err); }
 });
@@ -350,7 +350,7 @@ router.delete('/:id', authenticate, authorize('SUPER_ADMIN'), async (req, res, n
             where: { id: req.params.id },
             data:  { deletedAt: new Date(), status: 'DEACTIVATED' },
         });
-        await writeAuditLog({ userId: req.user.id, action: 'DELETE', resource: 'User', resourceId: req.params.id, req });
+        await writeAuditLog({ userId: req.user.id, action: 'DELETE', resource: 'User', resourceId: req.params.id, newData: { status: 'DEACTIVATED', deletedAt: new Date().toISOString() }, req });
         return successResponse(res, {}, 'User deactivated');
     } catch (err) { next(err); }
 });

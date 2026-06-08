@@ -50,7 +50,7 @@ router.post('/',
                 },
             });
 
-            await writeAuditLog({ userId: req.user.id, action: 'UPLOAD', resource: 'Credential', resourceId: credential.id, req });
+            await writeAuditLog({ userId: req.user.id, action: 'UPLOAD', resource: 'Credential', resourceId: credential.id, newData: { type: credential.type, status: 'PENDING', fileKey: credential.fileKey }, req });
 
             return createdResponse(res, credential, 'Credential uploaded and pending review');
         } catch (err) { next(err); }
@@ -144,7 +144,7 @@ router.patch('/:id/approve', authenticate, authorize('SUPER_ADMIN', 'RECRUITER')
             include: { nurseProfile: { include: { user: { select: { id: true, email: true } } } } },
         });
 
-        await writeAuditLog({ userId: req.user.id, action: 'APPROVE', resource: 'Credential', resourceId: credential.id, req });
+        await writeAuditLog({ userId: req.user.id, action: 'APPROVE', resource: 'Credential', resourceId: credential.id, newData: { status: 'APPROVED', type: credential.type, nurseProfileId: credential.nurseProfileId }, req });
 
         await dispatchNotification({
             userId:   credential.nurseProfile.user.id,
@@ -175,7 +175,7 @@ router.patch('/:id/reject', authenticate, authorize('SUPER_ADMIN', 'RECRUITER'),
                 include: { nurseProfile: { include: { user: { select: { id: true } } } } },
             });
 
-            await writeAuditLog({ userId: req.user.id, action: 'REJECT', resource: 'Credential', resourceId: credential.id, req });
+            await writeAuditLog({ userId: req.user.id, action: 'REJECT', resource: 'Credential', resourceId: credential.id, newData: { status: 'REJECTED', reason: req.body.reason, type: credential.type }, req });
 
             await dispatchNotification({
                 userId:   credential.nurseProfile.user.id,

@@ -144,7 +144,7 @@ router.patch('/:id', authenticate, requireFacilityAccess,
             );
 
             const facility = await prisma.facility.update({ where: { id: req.params.id }, data });
-            await writeAuditLog({ userId: req.user.id, action: 'UPDATE', resource: 'Facility', resourceId: facility.id, req });
+            await writeAuditLog({ userId: req.user.id, action: 'UPDATE', resource: 'Facility', resourceId: facility.id, newData: data, req });
             return successResponse(res, facility, 'Facility updated');
         } catch (err) { next(err); }
     }

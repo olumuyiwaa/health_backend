@@ -1,6 +1,11 @@
 
 function successResponse(res, data = {}, message = 'Success', statusCode = 200) {
-    return res.status(statusCode).json({ success: true, message, data });
+    // return res.status(statusCode).json({ success: true, message, data });
+    // Convert any BigInts in the payload
+    const sanitized = JSON.parse(JSON.stringify(data, (key, value) =>
+        typeof value === 'bigint' ? Number(value) : value
+    ));
+    return res.status(status).json(sanitized);
 }
 
 function createdResponse(res, data = {}, message = 'Created successfully') {
