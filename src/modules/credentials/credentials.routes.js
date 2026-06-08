@@ -214,17 +214,25 @@ router.get('/admin/expiry-alerts', authenticate, authorize('SUPER_ADMIN', 'RECRU
         const days = Number(req.query.days) || 30;
         const threshold = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
 
+        // const expiring = await prisma.credential.findMany({
+        //     where: {
+        //         status:    'APPROVED',
+        //         expiresAt: { lte: threshold, gte: new Date() },
+        //     },
+        //     include: {
+        //         nurseProfile: {
+        //             select: { firstName: true, lastName: true, user: { select: { email: true } } },
+        //         },
+        //     },
+        //     orderBy: { expiresAt: 'asc' },
+        // });
         const expiring = await prisma.credential.findMany({
             where: {
-                status:    'APPROVED',
-                expiresAt: { lte: threshold, gte: new Date() },
-            },
-            include: {
-                nurseProfile: {
-                    select: { firstName: true, lastName: true, user: { select: { email: true } } },
+                status: 'APPROVED',
+                expiresAt: {
+                    lte: threshold,
                 },
             },
-            orderBy: { expiresAt: 'asc' },
         });
 
         return successResponse(res, expiring);
