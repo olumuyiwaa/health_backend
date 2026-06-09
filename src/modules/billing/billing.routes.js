@@ -638,4 +638,99 @@ router.patch(
     }
 );
 
+// ─── Stripe Connect Onboarding for Nurses ───────────────────────────────
+
+// GET /billing/stripe/connect — Get Stripe onboarding link for nurse
+router.get('/stripe/connect', authenticate, authorize('NURSE'), async (req, res, next) => {
+    try {
+        const stripe = getStripe();
+        if (!stripe) return errorResponse(res, 'Stripe is not configured', 503);
+
+        // Fetch nurse with related user email
+        const nurse = await prisma.nurseProfile.findUnique({
+            where: { userId: req.user.id },
+            select: {
+                id: true,
+                stripeAccountId: true,
+                firstName: true,
+                lastName: true,
+                user: {
+                    select: {
+                        email: true,
+                    }
+                }
+            }
+        });
+
+        if (!nurse) return errorResponse(res, 'Nurse profile not found', 404);
+
+        let accountId = nurse.stripeAccountId;
+
+        // Create Stripe Express account if it doesn't exist
+        if (!accountId) {
+            const account = await stripe.accounts.create({
+                type: 'express',
+                country: 'US',
+                email: nurse.user.email,
+                capabilities: {
+                    card_payments: { requested: true },
+                    transfers: { requested: true },
+                },
+                metadata: {
+                    nurseProfileId: nurse.id,
+                    userId: req.user.id
+                },
+            });
+
+            accountId = account.id;
+
+            await prisma.nurseProfile.update({
+                where: { id: nurse.id },
+                data: { stripeAccountId: accountId }
+            });
+        }
+
+        // Generate onboarding link
+        const accountLink = await stripe.accountLinks.create({
+            account: accountId,
+            refresh_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/nurse/stripe/refresh`,
+            return_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/nurse/stripe/success`,
+            type: 'account_onboarding',
+        });
+
+        return successResponse(res, {
+            url: accountLink.url,
+            accountId
+        });
+
+    } catch (err) {
+        next(err);
+    }
+});
+
+// GET /billing/stripe/status — Check connection status
+router.get('/stripe/status', authenticate, authorize('NURSE'), async (req, res, next) => {
+    try {
+        const nurse = await prisma.nurseProfile.findUnique({
+            where: { userId: req.user.id },
+            select: { stripeAccountId: true }
+        });
+
+        if (!nurse?.stripeAccountId) {
+            return successResponse(res, { connected: false });
+        }
+
+        const stripe = getStripe();
+        const account = await stripe.accounts.retrieve(nurse.stripeAccountId);
+
+        return successResponse(res, {
+            connected: true,
+            payoutsEnabled: account.payouts_enabled,
+            chargesEnabled: account.charges_enabled,
+        });
+    } catch (err) {
+        next(err);
+    }
+});
+
 module.exports = router;

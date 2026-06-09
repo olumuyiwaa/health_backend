@@ -49,6 +49,7 @@ router.get('/', authenticate, authorize('SUPER_ADMIN', 'RECRUITER'),
     }
 );
 
+// GET /users/chat — list all users for the sake of messaging
 router.get('/chat', authenticate,
     async (req, res, next) => {
         try {
