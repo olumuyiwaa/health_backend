@@ -248,6 +248,59 @@ async function enable2FA(userId, totpCode) {
     return true;
 }
 
+async function disable2FA(userId, totpCode, currentPassword,req) {
+    // 1. Fetch user with sensitive fields
+    const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+            twoFactorEnabled: true,
+            twoFactorSecret: true,
+            passwordHash: true,
+        }
+    });
+
+    if (!user) throw new Error('User not found');
+    if (!user.twoFactorEnabled) throw new Error('2FA is not enabled on this account');
+
+    // 2. Verify current password
+    const isPasswordValid = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!isPasswordValid) {
+        throw new Error('Incorrect password');
+    }
+
+    // 3. Verify TOTP code
+    const isTotpValid = speakeasy.totp.verify({
+        secret: user.twoFactorSecret,
+        encoding: 'base32',
+        token: totpCode,
+        window: 1, // 30 seconds tolerance
+    });
+
+    if (!isTotpValid) {
+        throw new Error('Invalid verification code');
+    }
+
+    // 4. Disable 2FA
+    await prisma.user.update({
+        where: { id: userId },
+        data: {
+            twoFactorEnabled: false,
+            twoFactorSecret: null,
+        }
+    });
+
+    // 5. Audit log (important security action)
+    await writeAuditLog({
+        userId: userId,
+        action: 'DISABLE_2FA',
+        resource: 'User',
+        resourceId: userId,
+        req,
+    });
+
+    return true;
+}
+
 // ─── Token Refresh ────────────────────────────
 
 async function refreshTokens(refreshToken, req) {
@@ -359,6 +412,7 @@ module.exports = {
     verify2FA,
     setup2FA,
     enable2FA,
+    disable2FA,
     refreshTokens,
     logout,
     logoutAllDevices,

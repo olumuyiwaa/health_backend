@@ -93,6 +93,40 @@ router.post('/2fa/enable',
     }
 );
 
+// PATCH /auth/2fa/disable
+router.patch(
+    '/2fa/disable',
+    authenticate,
+    authRateLimiter,
+    [
+        body('totpCode')
+            .isLength({ min: 6, max: 6 })
+            .withMessage('TOTP code must be 6 digits'),
+        body('password')
+            .notEmpty()
+            .withMessage('Current password is required to disable 2FA'),
+    ],
+    validate,
+    async (req, res, next) => {
+        try {
+            await authService.disable2FA(
+                req.user.id,
+                req.body.totpCode,
+                req.body.password,
+                req
+            );
+
+            return successResponse(
+                res,
+                {},
+                'Two-factor authentication has been disabled successfully'
+            );
+        } catch (err) {
+            next(err);
+        }
+    }
+);
+
 // POST /auth/2fa/verify
 router.post('/2fa/verify',
     authRateLimiter,
