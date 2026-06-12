@@ -11,7 +11,7 @@ const { dispatchNotification } = require('../notifications/notifications.service
 const GEOFENCE_RADIUS = Number(process.env.EVV_GEOFENCE_RADIUS_METERS) || 200;
 
 // ─── Check-In ─────────────────────────────────
-
+// visit/:id/check-in
 router.post('/:id/check-in',
     authenticate, authorize('NURSE'),
     [
@@ -98,7 +98,7 @@ router.post('/:id/check-in',
 );
 
 // ─── Check-Out ────────────────────────────────
-
+// visit/:id/check-out
 router.post('/:id/check-out',
     authenticate, authorize('NURSE'),
     [

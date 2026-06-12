@@ -258,8 +258,9 @@ router.post(
             });
             if (!invoice) return errorResponse(res, 'Invoice not found', 404);
             if (invoice.status === 'PAID') return errorResponse(res, 'Invoice already paid', 400);
-            if (invoice.status !== 'ISSUED') return errorResponse(res, 'Invoice must be issued before payment', 400);
-
+            if (!['ISSUED', 'OVERDUE'].includes(invoice.status)) {
+                return errorResponse(res, 'Invoice is not eligible for payment', 400);
+            }
             // Ensure Stripe customer exists
             let customerId = invoice.facility.stripeCustomerId;
             if (!customerId) {
