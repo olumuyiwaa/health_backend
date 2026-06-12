@@ -274,8 +274,34 @@ router.get('/', authenticate, async (req, res, next) => {
                         },
                     },
                     auditEvents: {
-                        orderBy: { createdAt: 'asc' },
-                        take: 10 // limit audit events for performance
+                        orderBy: { createdAt: "asc" },
+                        take: 10,
+                        include: {
+                            performedBy: {
+                                select: {
+                                    id: true,
+                                    email: true,
+                                    adminProfile: {
+                                        select: {
+                                            firstName: true,
+                                            lastName: true
+                                        }
+                                    },
+                                    nurseProfile: {
+                                        select: {
+                                            firstName: true,
+                                            lastName: true
+                                        }
+                                    },
+                                    facilityMember: {
+                                        select: {
+                                            firstName: true,
+                                            lastName: true
+                                        }
+                                    }
+                                }
+                            }
+                        },
                     },
                 },
             }),
@@ -296,7 +322,18 @@ router.get('/:id', authenticate, async (req, res, next) => {
             include: {
                 assignment: { include: { shift: { include: { case: true } } } },
                 nurseProfile: { select: { firstName: true, lastName: true, designation: true } },
-                auditEvents: { orderBy: { createdAt: 'asc' } },
+                auditEvents: {
+                    orderBy: { createdAt: 'asc' },
+                    include: {
+                        performedBy: {
+                            include: {
+                                adminProfile: true,
+                                nurseProfile: true,
+                                facilityMember: true,
+                            }
+                        }
+                    }
+                }
             },
         });
         if (!visit) return errorResponse(res, 'Visit not found', 404);

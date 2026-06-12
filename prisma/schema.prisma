@@ -175,33 +175,34 @@ enum AuditAction {
 // ─────────────────────────────────────────────
 
 model User {
-  id                String        @id @default(uuid())
-  email             String        @unique
-  phone             String?       @unique
-  passwordHash      String
-  role              UserRole
-  status            AccountStatus @default(PENDING)
+  id                 String             @id @default(uuid())
+  email              String             @unique
+  phone              String?            @unique
+  passwordHash       String
+  role               UserRole
+  status             AccountStatus      @default(PENDING)
   verificationStatus VerificationStatus @default(UNVERIFIED)
-  emailVerifiedAt   DateTime?
-  phoneVerifiedAt   DateTime?
-  twoFactorEnabled  Boolean       @default(false)
-  twoFactorSecret   String?
-  lastLoginAt       DateTime?
-  lastLoginIp       String?
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
-  deletedAt         DateTime?
+  emailVerifiedAt    DateTime?
+  phoneVerifiedAt    DateTime?
+  twoFactorEnabled   Boolean            @default(false)
+  twoFactorSecret    String?
+  lastLoginAt        DateTime?
+  lastLoginIp        String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  deletedAt          DateTime?
 
   // Relations
-  adminProfile      AdminProfile?
-  nurseProfile      NurseProfile?
-  sessions          Session[]
-  passwordResets    PasswordReset[]
-  otpCodes          OtpCode[]
-  sentMessages      Message[]           @relation("SentMessages")
-  notifications     Notification[]
-  auditLogs         AuditLog[]
-  facilityMember    FacilityMember?
+  adminProfile   AdminProfile?
+  nurseProfile   NurseProfile?
+  sessions       Session[]
+  passwordResets PasswordReset[]
+  otpCodes       OtpCode[]
+  sentMessages   Message[]       @relation("SentMessages")
+  notifications  Notification[]
+  auditLogs      AuditLog[]
+  facilityMember FacilityMember?
+  VisitAuditLog  VisitAuditLog[]
 
   @@index([email])
   @@index([role])
@@ -209,58 +210,58 @@ model User {
 }
 
 model AdminProfile {
-  id          String   @id @default(uuid())
-  userId      String   @unique
-  firstName   String
-  lastName    String
-  avatarUrl   String?
-  department  String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String   @id @default(uuid())
+  userId     String   @unique
+  firstName  String
+  lastName   String
+  avatarUrl  String?
+  department String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Session {
-  id           String   @id @default(uuid())
-  userId       String
-  token        String   @unique
-  deviceModel  String?
-  deviceOs     String?
-  ipAddress    String?
-  userAgent    String?
-  isActive     Boolean  @default(true)
-  expiresAt    DateTime
-  createdAt    DateTime @default(now())
-  revokedAt    DateTime?
+  id          String    @id @default(uuid())
+  userId      String
+  token       String    @unique
+  deviceModel String?
+  deviceOs    String?
+  ipAddress   String?
+  userAgent   String?
+  isActive    Boolean   @default(true)
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+  revokedAt   DateTime?
 
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([token])
   @@index([userId])
 }
 
 model PasswordReset {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   userId    String
-  token     String   @unique
+  token     String    @unique
   expiresAt DateTime
   usedAt    DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model OtpCode {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   userId    String
   code      String
-  purpose   String   // email_verify | phone_verify | 2fa | password_reset
+  purpose   String // email_verify | phone_verify | 2fa | password_reset
   expiresAt DateTime
   usedAt    DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, purpose])
 }
@@ -270,35 +271,35 @@ model OtpCode {
 // ─────────────────────────────────────────────
 
 model NurseProfile {
-  id                  String           @id @default(uuid())
-  userId              String           @unique
-  firstName           String
-  lastName            String
-  designation         NurseDesignation
-  avatarUrl           String?
-  bio                 String?
-  yearsOfExperience   Int?
-  availabilityRadius  Float?           // miles
-  isAvailable         Boolean          @default(true)
-  backgroundChecked   Boolean          @default(false)
-  stripeAccountId     String?
-  fcmToken            String?
-  latitude            Float?
-  longitude           Float?
-  addressLine1        String?
-  addressLine2        String?
-  city                String?
-  state               String?
-  zipCode             String?
-  createdAt           DateTime         @default(now())
-  updatedAt           DateTime         @updatedAt
+  id                 String           @id @default(uuid())
+  userId             String           @unique
+  firstName          String
+  lastName           String
+  designation        NurseDesignation
+  avatarUrl          String?
+  bio                String?
+  yearsOfExperience  Int?
+  availabilityRadius Float? // miles
+  isAvailable        Boolean          @default(true)
+  backgroundChecked  Boolean          @default(false)
+  stripeAccountId    String?
+  fcmToken           String?
+  latitude           Float?
+  longitude          Float?
+  addressLine1       String?
+  addressLine2       String?
+  city               String?
+  state              String?
+  zipCode            String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
 
-  user                User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  credentials         Credential[]
-  assignments         ShiftAssignment[]
-  visits              Visit[]
-  wallet              Wallet?
-  payouts             Payout[]
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  credentials Credential[]
+  assignments ShiftAssignment[]
+  visits      Visit[]
+  wallet      Wallet?
+  payouts     Payout[]
 
   @@index([designation])
   @@index([isAvailable])
@@ -308,9 +309,9 @@ model Credential {
   id              String           @id @default(uuid())
   nurseProfileId  String
   type            CredentialType
-  customLabel     String?          // for CUSTOM type
-  fileUrl         String           // DO Spaces signed path
-  fileKey         String           // DO Spaces object key
+  customLabel     String? // for CUSTOM type
+  fileUrl         String // DO Spaces signed path
+  fileKey         String // DO Spaces object key
   status          CredentialStatus @default(PENDING)
   issuedAt        DateTime?
   expiresAt       DateTime?
@@ -320,7 +321,7 @@ model Credential {
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
 
-  nurseProfile    NurseProfile     @relation(fields: [nurseProfileId], references: [id], onDelete: Cascade)
+  nurseProfile NurseProfile @relation(fields: [nurseProfileId], references: [id], onDelete: Cascade)
 
   @@index([nurseProfileId, type])
   @@index([expiresAt])
@@ -332,29 +333,29 @@ model Credential {
 // ─────────────────────────────────────────────
 
 model Facility {
-  id                   String   @id @default(uuid())
-  name                 String
-  slug                 String   @unique
-  email                String   @unique
-  phone                String?
-  taxId                String?
-  npiNumber            String?
-  logoUrl              String?
-  status               AccountStatus @default(PENDING)
-  stripeCustomerId     String?
+  id                    String        @id @default(uuid())
+  name                  String
+  slug                  String        @unique
+  email                 String        @unique
+  phone                 String?
+  taxId                 String?
+  npiNumber             String?
+  logoUrl               String?
+  status                AccountStatus @default(PENDING)
+  stripeCustomerId      String?
   stripePaymentMethodId String?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
-  deletedAt            DateTime?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+  deletedAt             DateTime?
 
-  addresses            FacilityAddress[]
-  members              FacilityMember[]
-  requirements         WorkplaceRequirement[]
-  staffingPreferences  StaffingPreference?
-  notificationPrefs    FacilityNotificationPref?
-  cases                Case[]
-  invoices             Invoice[]
-  billingInfo          FacilityBilling?
+  addresses           FacilityAddress[]
+  members             FacilityMember[]
+  requirements        WorkplaceRequirement[]
+  staffingPreferences StaffingPreference?
+  notificationPrefs   FacilityNotificationPref?
+  cases               Case[]
+  invoices            Invoice[]
+  billingInfo         FacilityBilling?
 
   @@index([status])
 }
@@ -375,23 +376,23 @@ model FacilityAddress {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  facility     Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  facility Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
 }
 
 model FacilityBilling {
-  id              String   @id @default(uuid())
-  facilityId      String   @unique
-  billingName     String
-  billingEmail    String
-  billingPhone    String?
-  addressLine1    String
-  city            String
-  state           String
-  zipCode         String
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id           String   @id @default(uuid())
+  facilityId   String   @unique
+  billingName  String
+  billingEmail String
+  billingPhone String?
+  addressLine1 String
+  city         String
+  state        String
+  zipCode      String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  facility        Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  facility Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
 }
 
 model FacilityMember {
@@ -402,58 +403,58 @@ model FacilityMember {
   lastName        String
   jobTitle        String?
   officePhone     String?
-  permissionsMask Json?    // granular toggle map
+  permissionsMask Json? // granular toggle map
   isActive        Boolean  @default(true)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  facility        Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  facility Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([facilityId])
 }
 
 model WorkplaceRequirement {
-  id             String           @id @default(uuid())
+  id             String             @id @default(uuid())
   facilityId     String
   credentialType CredentialType
   customLabel    String?
-  isMandatory    Boolean          @default(true)
+  isMandatory    Boolean            @default(true)
   appliesToRoles NurseDesignation[]
   notes          String?
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
 
-  facility       Facility         @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  facility Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
 
   @@unique([facilityId, credentialType])
 }
 
 model StaffingPreference {
-  id                  String             @id @default(uuid())
-  facilityId          String             @unique
+  id                    String             @id @default(uuid())
+  facilityId            String             @unique
   preferredDesignations NurseDesignation[]
-  genderPreference    String?            // any | male | female
-  maxRadiusMiles      Float?
-  autoApproveBookings Boolean            @default(false)
-  createdAt           DateTime           @default(now())
-  updatedAt           DateTime           @updatedAt
+  genderPreference      String? // any | male | female
+  maxRadiusMiles        Float?
+  autoApproveBookings   Boolean            @default(false)
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
 
-  facility            Facility           @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  facility Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
 }
 
 model FacilityNotificationPref {
-  id                    String   @id @default(uuid())
-  facilityId            String   @unique
-  emailOnNewBooking     Boolean  @default(true)
-  emailOnCancellation   Boolean  @default(true)
-  emailOnVisitComplete  Boolean  @default(true)
-  smsOnEmergencyFill    Boolean  @default(false)
-  pushEnabled           Boolean  @default(true)
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  id                   String   @id @default(uuid())
+  facilityId           String   @unique
+  emailOnNewBooking    Boolean  @default(true)
+  emailOnCancellation  Boolean  @default(true)
+  emailOnVisitComplete Boolean  @default(true)
+  smsOnEmergencyFill   Boolean  @default(false)
+  pushEnabled          Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
-  facility              Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  facility Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
 }
 
 // ─────────────────────────────────────────────
@@ -461,83 +462,83 @@ model FacilityNotificationPref {
 // ─────────────────────────────────────────────
 
 model Case {
-  id               String     @id @default(uuid())
+  id               String    @id @default(uuid())
   facilityId       String
-  publicIdentifier String     @unique // Case-PT-XXXX
-  patientFirstName String?    // encrypted / masked
+  publicIdentifier String    @unique // Case-PT-XXXX
+  patientFirstName String? // encrypted / masked
   patientLastName  String?
   dateOfBirth      DateTime?
   gender           String?
   primaryDiagnosis String?
   notes            String?
 
-  addressLine1     String
-  addressLine2     String?
-  city             String
-  state            String
-  zipCode          String
-  latitude         Float?
-  longitude        Float?
+  addressLine1 String
+  addressLine2 String?
+  city         String
+  state        String
+  zipCode      String
+  latitude     Float?
+  longitude    Float?
 
-  isOasisCase      Boolean    @default(false)
-  oasisType        OasisType?
+  isOasisCase Boolean    @default(false)
+  oasisType   OasisType?
 
-  visitType        VisitType
-  specialties      String[]   // array of specialty codes
+  visitType   VisitType
+  specialties String[] // array of specialty codes
 
-  isActive         Boolean    @default(true)
-  createdById      String?
-  createdAt        DateTime   @default(now())
-  updatedAt        DateTime   @updatedAt
-  deletedAt        DateTime?
+  isActive    Boolean   @default(true)
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
 
-  facility         Facility   @relation(fields: [facilityId], references: [id])
-  shifts           Shift[]
+  facility Facility @relation(fields: [facilityId], references: [id])
+  shifts   Shift[]
 
   @@index([facilityId])
   @@index([publicIdentifier])
 }
 
 model Shift {
-  id                String        @id @default(uuid())
-  caseId            String
-  facilityId        String
-  title             String?
-  description       String?
+  id          String  @id @default(uuid())
+  caseId      String
+  facilityId  String
+  title       String?
+  description String?
 
-  visitType         VisitType
+  visitType           VisitType
   requiredDesignation NurseDesignation
-  specialties       String[]
+  specialties         String[]
 
-  pattern           ShiftPattern  @default(ONE_TIME)
-  period            ShiftPeriod   @default(DAY)
+  pattern           ShiftPattern @default(ONE_TIME)
+  period            ShiftPeriod  @default(DAY)
   scheduledStart    DateTime
   scheduledEnd      DateTime
-  estimatedDuration Int?          // minutes
-  recurringDays     Int[]         // 0=Sun ... 6=Sat
+  estimatedDuration Int? // minutes
+  recurringDays     Int[] // 0=Sun ... 6=Sat
   recurringEndDate  DateTime?
 
-  status            ShiftStatus   @default(OPEN)
-  isUrgent          Boolean       @default(false)
-  isEmergencyFill   Boolean       @default(false)
-  allowInstantBook  Boolean       @default(true)
+  status           ShiftStatus @default(OPEN)
+  isUrgent         Boolean     @default(false)
+  isEmergencyFill  Boolean     @default(false)
+  allowInstantBook Boolean     @default(true)
 
-  chargeRate        Decimal       @db.Decimal(10, 2)
-  payRate           Decimal       @db.Decimal(10, 2)
-  billingType       String        @default("HOURLY")
+  chargeRate  Decimal @db.Decimal(10, 2)
+  payRate     Decimal @db.Decimal(10, 2)
+  billingType String  @default("HOURLY")
 
-  genderPreference  String?
-  internalNotes     String?
-  cancelReason      String?
-  cancelledAt       DateTime?
-  cancelledById     String?
+  genderPreference String?
+  internalNotes    String?
+  cancelReason     String?
+  cancelledAt      DateTime?
+  cancelledById    String?
 
-  createdById       String?
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  case              Case          @relation(fields: [caseId], references: [id])
-  assignments       ShiftAssignment[]
+  case        Case              @relation(fields: [caseId], references: [id])
+  assignments ShiftAssignment[]
 
   @@index([caseId])
   @@index([facilityId])
@@ -550,7 +551,7 @@ model ShiftAssignment {
   shiftId         String
   nurseProfileId  String
   status          AssignmentStatus @default(PENDING)
-  assignedById    String?          // null = self-book, set = manual by admin/facility
+  assignedById    String? // null = self-book, set = manual by admin/facility
   acceptedAt      DateTime?
   rejectedAt      DateTime?
   rejectionReason String?
@@ -560,9 +561,9 @@ model ShiftAssignment {
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
 
-  shift           Shift            @relation(fields: [shiftId], references: [id])
-  nurseProfile    NurseProfile     @relation(fields: [nurseProfileId], references: [id])
-  visit           Visit?
+  shift        Shift        @relation(fields: [shiftId], references: [id])
+  nurseProfile NurseProfile @relation(fields: [nurseProfileId], references: [id])
+  visit        Visit?
 
   @@unique([shiftId, nurseProfileId])
   @@index([nurseProfileId])
@@ -574,41 +575,41 @@ model ShiftAssignment {
 // ─────────────────────────────────────────────
 
 model Visit {
-  id                 String      @id @default(uuid())
-  assignmentId       String      @unique
-  nurseProfileId     String
-  shiftId            String
+  id             String @id @default(uuid())
+  assignmentId   String @unique
+  nurseProfileId String
+  shiftId        String
 
-  status             VisitStatus @default(SCHEDULED)
+  status VisitStatus @default(SCHEDULED)
 
-  checkInTime        DateTime?
-  checkInLatitude    Float?
-  checkInLongitude   Float?
-  checkInDistance    Float?      // meters from case address
-  checkInIpAddress   String?
-  checkInQrCode      String?
+  checkInTime      DateTime?
+  checkInLatitude  Float?
+  checkInLongitude Float?
+  checkInDistance  Float? // meters from case address
+  checkInIpAddress String?
+  checkInQrCode    String?
 
-  checkOutTime       DateTime?
-  checkOutLatitude   Float?
-  checkOutLongitude  Float?
-  checkOutDistance   Float?
-  checkOutIpAddress  String?
+  checkOutTime      DateTime?
+  checkOutLatitude  Float?
+  checkOutLongitude Float?
+  checkOutDistance  Float?
+  checkOutIpAddress String?
 
-  durationMinutes    Int?
-  signatureUrl       String?
+  durationMinutes Int?
+  signatureUrl    String?
 
-  overrideRequired   Boolean     @default(false)
-  overrideReason     String?
+  overrideRequired     Boolean   @default(false)
+  overrideReason       String?
   overrideApprovedById String?
-  overrideApprovedAt DateTime?
+  overrideApprovedAt   DateTime?
 
-  notes              String?
-  createdAt          DateTime    @default(now())
-  updatedAt          DateTime    @updatedAt
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  assignment         ShiftAssignment @relation(fields: [assignmentId], references: [id])
-  nurseProfile       NurseProfile    @relation(fields: [nurseProfileId], references: [id])
-  auditEvents        VisitAuditLog[]
+  assignment   ShiftAssignment @relation(fields: [assignmentId], references: [id])
+  nurseProfile NurseProfile    @relation(fields: [nurseProfileId], references: [id])
+  auditEvents  VisitAuditLog[]
 
   @@index([nurseProfileId])
   @@index([shiftId])
@@ -616,14 +617,17 @@ model Visit {
 }
 
 model VisitAuditLog {
-  id         String   @id @default(uuid())
-  visitId    String
-  action     String
+  id            String   @id @default(uuid())
+  visitId       String
+  action        String
   performedById String?
-  metadata   Json?
-  createdAt  DateTime @default(now())
+  metadata      Json?
+  createdAt     DateTime @default(now())
 
-  visit      Visit    @relation(fields: [visitId], references: [id])
+  visit       Visit @relation(fields: [visitId], references: [id])
+  performedBy User? @relation(fields: [performedById], references: [id], onDelete: SetNull)
+
+  @@index([performedById])
 }
 
 // ─────────────────────────────────────────────
@@ -631,14 +635,14 @@ model VisitAuditLog {
 // ─────────────────────────────────────────────
 
 model Conversation {
-  id           String    @id @default(uuid())
+  id             String    @id @default(uuid())
   participantIds String[] // user IDs
-  facilityId   String?
-  lastMessageAt DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  facilityId     String?
+  lastMessageAt  DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  messages     Message[]
+  messages Message[]
 }
 
 model Message {
@@ -653,8 +657,8 @@ model Message {
   readAt         DateTime?
   createdAt      DateTime      @default(now())
 
-  conversation   Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  sender         User          @relation("SentMessages", fields: [senderId], references: [id])
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation("SentMessages", fields: [senderId], references: [id])
 
   @@index([conversationId])
   @@index([senderId])
@@ -665,19 +669,19 @@ model Message {
 // ─────────────────────────────────────────────
 
 model Notification {
-  id         String              @id @default(uuid())
-  userId     String
-  type       NotificationType
-  channel    NotificationChannel
-  title      String
-  body       String
-  data       Json?
-  isRead     Boolean             @default(false)
-  readAt     DateTime?
-  sentAt     DateTime?
-  createdAt  DateTime            @default(now())
+  id        String              @id @default(uuid())
+  userId    String
+  type      NotificationType
+  channel   NotificationChannel
+  title     String
+  body      String
+  data      Json?
+  isRead    Boolean             @default(false)
+  readAt    DateTime?
+  sentAt    DateTime?
+  createdAt DateTime            @default(now())
 
-  user       User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, isRead])
   @@index([type])
@@ -688,16 +692,16 @@ model Notification {
 // ─────────────────────────────────────────────
 
 model Wallet {
-  id              String       @id @default(uuid())
-  nurseProfileId  String       @unique
-  pendingBalance  Decimal      @default(0) @db.Decimal(10, 2)
-  availableBalance Decimal     @default(0) @db.Decimal(10, 2)
-  lifetimeEarnings Decimal     @default(0) @db.Decimal(10, 2)
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  id               String   @id @default(uuid())
+  nurseProfileId   String   @unique
+  pendingBalance   Decimal  @default(0) @db.Decimal(10, 2)
+  availableBalance Decimal  @default(0) @db.Decimal(10, 2)
+  lifetimeEarnings Decimal  @default(0) @db.Decimal(10, 2)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  nurseProfile    NurseProfile @relation(fields: [nurseProfileId], references: [id], onDelete: Cascade)
-  payouts         Payout[]
+  nurseProfile NurseProfile @relation(fields: [nurseProfileId], references: [id], onDelete: Cascade)
+  payouts      Payout[]
 }
 
 model Payout {
@@ -715,47 +719,47 @@ model Payout {
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
-  nurseProfile     NurseProfile @relation(fields: [nurseProfileId], references: [id])
-  wallet           Wallet       @relation(fields: [walletId], references: [id])
+  nurseProfile NurseProfile @relation(fields: [nurseProfileId], references: [id])
+  wallet       Wallet       @relation(fields: [walletId], references: [id])
 }
 
 model Invoice {
-  id              String        @id @default(uuid())
-  facilityId      String
-  invoiceNumber   String        @unique
-  status          InvoiceStatus @default(DRAFT)
-  periodStart     DateTime
-  periodEnd       DateTime
-  subtotal        Decimal       @db.Decimal(10, 2)
-  tax             Decimal       @default(0) @db.Decimal(10, 2)
-  total           Decimal       @db.Decimal(10, 2)
-  stripeInvoiceId String?
+  id                    String        @id @default(uuid())
+  facilityId            String
+  invoiceNumber         String        @unique
+  status                InvoiceStatus @default(DRAFT)
+  periodStart           DateTime
+  periodEnd             DateTime
+  subtotal              Decimal       @db.Decimal(10, 2)
+  tax                   Decimal       @default(0) @db.Decimal(10, 2)
+  total                 Decimal       @db.Decimal(10, 2)
+  stripeInvoiceId       String?
   stripePaymentIntentId String?
-  paidAt          DateTime?
-  dueAt           DateTime?
-  fileUrl         String?
-  notes           String?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  paidAt                DateTime?
+  dueAt                 DateTime?
+  fileUrl               String?
+  notes                 String?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
 
-  facility        Facility      @relation(fields: [facilityId], references: [id])
-  lineItems       InvoiceLineItem[]
+  facility  Facility          @relation(fields: [facilityId], references: [id])
+  lineItems InvoiceLineItem[]
 
   @@index([facilityId])
   @@index([status])
 }
 
 model InvoiceLineItem {
-  id            String   @id @default(uuid())
-  invoiceId     String
-  shiftId       String?
-  description   String
-  quantity      Float
-  unitRate      Decimal  @db.Decimal(10, 2)
-  amount        Decimal  @db.Decimal(10, 2)
-  createdAt     DateTime @default(now())
+  id          String   @id @default(uuid())
+  invoiceId   String
+  shiftId     String?
+  description String
+  quantity    Float
+  unitRate    Decimal  @db.Decimal(10, 2)
+  amount      Decimal  @db.Decimal(10, 2)
+  createdAt   DateTime @default(now())
 
-  invoice       Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 }
 
 // ─────────────────────────────────────────────
@@ -766,7 +770,7 @@ model AuditLog {
   id           String      @id @default(uuid())
   userId       String?
   action       AuditAction
-  resource     String      // table/entity name
+  resource     String // table/entity name
   resourceId   String?
   previousData Json?
   newData      Json?
@@ -774,7 +778,7 @@ model AuditLog {
   userAgent    String?
   createdAt    DateTime    @default(now())
 
-  user         User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([resource, resourceId])
