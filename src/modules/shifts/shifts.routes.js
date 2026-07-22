@@ -7,51 +7,38 @@ const { successResponse, createdResponse, errorResponse, paginatedResponse, buil
 const { writeAuditLog } = require('../../utils/audit');
 const { dispatchNotification } = require('../notifications/notifications.service');
 const crypto = require("crypto");
+const { sendCsv } = require('../../utils/csv');
 
+const EXPORT_LIMIT = 10000;
+const {
+    createRecurringOccurrences,
+    cancelRecurringSeries,
+    getSeriesShifts,
+} = require('./recurring');
 
 // ─── Create Shift ──────────────────────────────
 function generatePublicIdentifier() {
     return `Case-PT-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
 }
+// ─── Create Shift ──────────────────────────────
 router.post(
     "/",
     authenticate,
     authorize("SUPER_ADMIN", "FACILITY_ADMIN", "TEAM_MEMBER"),
     [
         body("facilityId").optional().isUUID(),
-
-        body("visitType").isIn([
-            "ADMISSION",
-            "REGULAR",
-            "RESUMPTION_OF_CARE",
-            "RECERTIFICATION",
-            "SUPERVISORY",
-            "DISCHARGE",
-        ]),
-
-        body("requiredDesignation").isIn([
-            "RN",
-            "LVN",
-            "LPN",
-            "CNA",
-            "HHA",
-            "THERAPIST",
-            "CAREGIVER",
-        ]),
-
+        body("visitType").isIn(["ADMISSION", "REGULAR", "RESUMPTION_OF_CARE", "RECERTIFICATION", "SUPERVISORY", "DISCHARGE"]),
+        body("requiredDesignation").isIn(["RN", "LVN", "LPN", "CNA", "HHA", "THERAPIST", "CAREGIVER"]),
         body("scheduledStart").isISO8601(),
         body("scheduledEnd").isISO8601(),
-
         body("chargeRate").isDecimal(),
         body("payRate").isDecimal(),
-
         body("pattern").optional().isIn(["ONE_TIME", "RECURRING"]),
         body("period").optional().isIn(["DAY", "NIGHT", "FLEXIBLE"]),
-
         body("specialties").optional().isArray(),
-        body("recurringDays").optional().isArray(),
+        body("recurringDays").optional().isArray({ min: 1 }),
+        body("recurringDays.*").optional().isInt({ min: 0, max: 6 }),
         body("recurringEndDate").optional({ nullable: true }).isISO8601(),
-
         body("title").optional().isString(),
         body("description").optional().isString(),
         body("estimatedDuration").optional().isInt({ min: 0 }),
@@ -64,6 +51,70 @@ router.post(
     validate,
     async (req, res, next) => {
         try {
+            // ─── Extract & Normalize Input ─────────────────────
+            const pattern = req.body.pattern || "ONE_TIME";
+
+            const scheduledStart = new Date(req.body.scheduledStart);
+            const scheduledEnd = new Date(req.body.scheduledEnd);
+
+            const recurringEndDate = req.body.recurringEndDate
+                ? new Date(req.body.recurringEndDate)
+                : null;
+
+            const recurringDays = Array.isArray(req.body.recurringDays)
+                ? req.body.recurringDays
+                    .map(Number)
+                    .filter((day) => Number.isInteger(day) && day >= 0 && day <= 6)
+                : [];
+
+            const specialties = Array.isArray(req.body.specialties)
+                ? req.body.specialties
+                : [];
+            // ─── Auto-fix for recurring shifts ─────────────────
+            if (pattern === "RECURRING") {
+                const startDay = scheduledStart.getDay();
+                if (!recurringDays.includes(startDay)) {
+                    recurringDays.push(startDay);
+                    recurringDays.sort((a, b) => a - b);
+                    console.warn(`[Shift Creation] Auto-added start day ${startDay} to recurringDays`);
+                }
+            }
+            // ─── Basic Validations ─────────────────────────────
+            if (scheduledEnd <= scheduledStart) {
+                return errorResponse(res, "Scheduled end must be after scheduled start", 400);
+            }
+
+            // ─── Recurring Shift Validations ───────────────────
+            if (pattern === "RECURRING") {
+                if (!recurringDays.length) {
+                    return errorResponse(res, "Recurring shifts require recurringDays", 400);
+                }
+                if (!recurringEndDate) {
+                    return errorResponse(res, "Recurring shifts require recurringEndDate", 400);
+                }
+                if (recurringEndDate < scheduledStart) {
+                    return errorResponse(res, "Recurring end date must be on or after scheduled start", 400);
+                }
+                if (!recurringDays.includes(scheduledStart.getDay())) {
+                    const dayNames = ['Sunday i.e 0', 'Monday i.e 1', 'Tuesday i.e 2', 'Wednesday i.e 3', 'Thursday i.e 4', 'Friday i.e 5', 'Saturday i.e 6'];
+                    const startDayName = dayNames[scheduledStart.getDay()];
+
+                    return errorResponse(
+                        res,
+                        `recurringDays must include the start day (${startDayName}). Current recurringDays: ${recurringDays.join(', ')}`,
+                    400
+                );
+                }
+
+                const maxRecurringEndDate = new Date(scheduledStart);
+                maxRecurringEndDate.setFullYear(maxRecurringEndDate.getFullYear() + 1);
+
+                if (recurringEndDate > maxRecurringEndDate) {
+                    return errorResponse(res, "Recurring shifts cannot extend beyond 1 year", 400);
+                }
+            }
+
+            // ─── Facility Authorization & Checks ───────────────
             const facilityId =
                 req.user.role === "SUPER_ADMIN"
                     ? req.body.facilityId
@@ -94,50 +145,23 @@ router.post(
                 },
             });
 
-            if (!facility) {
-                return errorResponse(res, "Facility not found", 404);
-            }
-
-            if (facility.status !== "ACTIVE") {
-                return errorResponse(res, "Facility is not active", 400);
-            }
-
-            if (
-                req.user.role !== "SUPER_ADMIN" &&
-                facility.id !== req.user.facilityMember?.facilityId
-            ) {
+            if (!facility) return errorResponse(res, "Facility not found", 404);
+            if (facility.status !== "ACTIVE") return errorResponse(res, "Facility is not active", 400);
+            if (req.user.role !== "SUPER_ADMIN" && facility.id !== req.user.facilityMember?.facilityId) {
                 return errorResponse(res, "Forbidden", 403);
             }
 
             const primaryAddress = facility.addresses[0];
-
             if (!primaryAddress) {
-                return errorResponse(
-                    res,
-                    "Facility must have a primary address before creating shifts",
-                    400
-                );
+                return errorResponse(res, "Facility must have a primary address before creating shifts", 400);
             }
 
-            const scheduledStart = new Date(req.body.scheduledStart);
-            const scheduledEnd = new Date(req.body.scheduledEnd);
-
-            if (scheduledEnd <= scheduledStart) {
-                return errorResponse(res, "Scheduled end must be after scheduled start", 400);
-            }
-
-            const specialties = Array.isArray(req.body.specialties)
-                ? req.body.specialties
-                : [];
-
-            const recurringDays = Array.isArray(req.body.recurringDays)
-                ? req.body.recurringDays.map(Number).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6)
-                : [];
-
+            // ─── Database Transaction ──────────────────────────
             const result = await prisma.$transaction(async (tx) => {
                 let caseId = req.body.caseId;
                 let createdCase = null;
 
+                // Handle Case (existing or new)
                 if (caseId) {
                     const existingCase = await tx.case.findUnique({
                         where: { id: caseId },
@@ -168,6 +192,7 @@ router.post(
                     caseId = createdCase.id;
                 }
 
+                // Create Parent Shift
                 const shift = await tx.shift.create({
                     data: {
                         caseId,
@@ -177,13 +202,13 @@ router.post(
                         visitType: req.body.visitType,
                         requiredDesignation: req.body.requiredDesignation,
                         specialties,
-                        pattern: req.body.pattern || "ONE_TIME",
+                        pattern,
                         period: req.body.period || "DAY",
                         scheduledStart,
                         scheduledEnd,
                         estimatedDuration: req.body.estimatedDuration ? Number(req.body.estimatedDuration) : null,
                         recurringDays,
-                        recurringEndDate: req.body.recurringEndDate ? new Date(req.body.recurringEndDate) : null,
+                        recurringEndDate,
                         chargeRate: parseFloat(req.body.chargeRate),
                         payRate: parseFloat(req.body.payRate),
                         billingType: req.body.billingType || "HOURLY",
@@ -196,17 +221,135 @@ router.post(
                     include: { case: true, assignments: true },
                 });
 
-                return { createdCase, shift };
+                let occurrenceIds = [shift.id];
+
+                if (pattern === "RECURRING") {
+                    occurrenceIds = await createRecurringOccurrences(shift, tx);
+                }
+
+                // Fetch final shift with updated parentShiftId
+                const finalShift = await tx.shift.findUnique({
+                    where: { id: shift.id },
+                    include: { case: true, assignments: true },
+                });
+
+                return { createdCase, shift: finalShift, occurrenceIds };
             });
 
+            // ─── Audit Logging ─────────────────────────────────
             if (result.createdCase) {
-                await writeAuditLog({ userId: req.user.id, action: 'CREATE', resource: 'Shift', resourceId: shift.id, newData: { visitType: shift.visitType, requiredDesignation: shift.requiredDesignation, status: shift.status, scheduledStart: shift.scheduledStart, facilityId: shift.facilityId }, req });
+                await writeAuditLog({
+                    userId: req.user.id,
+                    action: 'CREATE',
+                    resource: 'Case',
+                    resourceId: result.createdCase.id,
+                    newData: {
+                        facilityId: result.createdCase.facilityId,
+                        publicIdentifier: result.createdCase.publicIdentifier,
+                        visitType: result.createdCase.visitType,
+                    },
+                    req,
+                });
             }
 
-            await writeAuditLog({ userId: req.user.id, action: 'CREATE', resource: 'Shift', resourceId: shift.id, newData: { visitType: shift.visitType, requiredDesignation: shift.requiredDesignation, status: shift.status, scheduledStart: shift.scheduledStart, facilityId: shift.facilityId }, req });
+            await writeAuditLog({
+                userId: req.user.id,
+                action: 'CREATE',
+                resource: 'Shift',
+                resourceId: result.shift.id,
+                newData: {
+                    visitType: result.shift.visitType,
+                    requiredDesignation: result.shift.requiredDesignation,
+                    status: result.shift.status,
+                    scheduledStart: result.shift.scheduledStart,
+                    facilityId: result.shift.facilityId,
+                },
+                req,
+            });
 
+            return createdResponse(res, {
+                ...result.shift,
+                occurrenceIds: result.occurrenceIds,
+            });
+        } catch (err) {
+            next(err);
+        }
+    }
+);
 
-            return createdResponse(res, result.shift);
+// GET /shifts/export
+router.get('/export',
+    authenticate,
+    authorize('SUPER_ADMIN', 'FACILITY_ADMIN', 'TEAM_MEMBER', 'RECRUITER'),
+    async (req, res, next) => {
+        try {
+            const { facilityId, caseId, status, nurseProfileId } = req.query;
+
+            let facilityFilter = facilityId;
+            if (['FACILITY_ADMIN', 'TEAM_MEMBER'].includes(req.user.role)) {
+                facilityFilter = req.user.facilityMember?.facilityId;
+            }
+
+            const where = {
+                ...(facilityFilter ? { facilityId: facilityFilter } : {}),
+                ...(caseId ? { caseId } : {}),
+                ...(status ? { status } : {}),
+                ...(nurseProfileId ? { assignments: { some: { nurseProfileId } } } : {}),
+            };
+
+            const shifts = await prisma.shift.findMany({
+                where,
+                take: EXPORT_LIMIT,
+                orderBy: { scheduledStart: 'desc' },
+                include: {
+                    facility: { select: { name: true } },        // ← Now works
+                    case: {
+                        select: {
+                            publicIdentifier: true,
+                            city: true,
+                            state: true
+                        }
+                    },
+                    assignments: {
+                        where: { status: 'ACCEPTED' },
+                        include: {
+                            nurseProfile: {
+                                select: {
+                                    firstName: true,
+                                    lastName: true,
+                                    designation: true,
+                                },
+                            },
+                        },
+                    },
+                },
+            });
+
+            return sendCsv(res, 'shifts-export.csv', shifts, [
+                { label: 'Shift ID', key: 'id' },
+                { label: 'Facility', value: (item) => item.facility?.name },   // ← Now shows name
+                { label: 'Case ID', value: (item) => item.case?.publicIdentifier },
+                { label: 'Case City', value: (item) => item.case?.city },
+                { label: 'Case State', value: (item) => item.case?.state },
+                { label: 'Title', key: 'title' },
+                { label: 'Visit Type', key: 'visitType' },
+                { label: 'Required Designation', key: 'requiredDesignation' },
+                { label: 'Status', key: 'status' },
+                { label: 'Scheduled Start', key: 'scheduledStart' },
+                { label: 'Scheduled End', key: 'scheduledEnd' },
+                { label: 'Pay Rate', key: 'payRate' },
+                { label: 'Charge Rate', key: 'chargeRate' },
+                { label: 'Urgent', key: 'isUrgent' },
+                {
+                    label: 'Assigned Nurse',
+                    value: (item) => {
+                        const assignment = item.assignments?.[0];
+                        if (!assignment?.nurseProfile) return '';
+                        return `${assignment.nurseProfile.firstName} ${assignment.nurseProfile.lastName}`.trim();
+                    },
+                },
+                { label: 'Created At', key: 'createdAt' },
+            ]);
         } catch (err) {
             next(err);
         }
@@ -218,11 +361,16 @@ router.post(
 router.get('/marketplace', authenticate, authorize('NURSE'), async (req, res, next) => {
     try {
         const {
-            page = 1, limit = 20,
-            designation, visitType, isUrgent,
-            minPay, maxPay,
+            page = 1,
+            limit = 20,
+            designation,
+            visitType,
+            isUrgent,
+            minPay,
+            maxPay,
             lat, lng, radiusMiles,
             date,
+            searchQuery,
         } = req.query;
 
         const skip = (page - 1) * limit;
@@ -235,20 +383,33 @@ router.get('/marketplace', authenticate, authorize('NURSE'), async (req, res, ne
         const where = {
             status: 'OPEN',
             requiredDesignation: designation || nurseProfile.designation,
-            ...(visitType   ? { visitType }              : {}),
+            ...(visitType ? { visitType } : {}),
             ...(isUrgent === 'true' ? { isUrgent: true } : {}),
-            ...(minPay      ? { payRate: { gte: parseFloat(minPay) } } : {}),
-            ...(maxPay      ? { payRate: { lte: parseFloat(maxPay) } } : {}),
-            ...(date        ? {
+            ...(minPay ? { payRate: { gte: parseFloat(minPay) } } : {}),
+            ...(maxPay ? { payRate: { lte: parseFloat(maxPay) } } : {}),
+            ...(date ? {
                 scheduledStart: {
                     gte: new Date(date),
-                    lt:  new Date(new Date(date).setDate(new Date(date).getDate() + 1)),
+                    lt: new Date(new Date(date).setDate(new Date(date).getDate() + 1)),
                 },
             } : {
                 scheduledStart: { gte: new Date() },
             }),
             case: { isActive: true },
         };
+
+        // ── Add Search Logic ─────────────────────────────────────
+        if (searchQuery && typeof searchQuery === 'string' && searchQuery.trim() !== '') {
+            const searchTerm = searchQuery.trim().toLowerCase();
+
+            where.OR = [
+                { case: { city: { contains: searchTerm, mode: 'insensitive' } } },
+                { case: { state: { contains: searchTerm, mode: 'insensitive' } } },
+                // TODO: Add more fields to search on:
+                // { case: { publicIdentifier: { contains: searchTerm, mode: 'insensitive' } } },
+                // { notes: { contains: searchTerm, mode: 'insensitive' } },
+            ];
+        }
 
         const [shifts, total] = await Promise.all([
             prisma.shift.findMany({
@@ -259,8 +420,12 @@ router.get('/marketplace', authenticate, authorize('NURSE'), async (req, res, ne
                 include: {
                     case: {
                         select: {
-                            publicIdentifier: true, city: true, state: true,
-                            latitude: true, longitude: true, specialties: true,
+                            publicIdentifier: true,
+                            city: true,
+                            state: true,
+                            latitude: true,
+                            longitude: true,
+                            specialties: true,
                             visitType: true,
                         },
                     },
@@ -270,7 +435,9 @@ router.get('/marketplace', authenticate, authorize('NURSE'), async (req, res, ne
         ]);
 
         return paginatedResponse(res, shifts, buildPagination(page, limit, total));
-    } catch (err) { next(err); }
+    } catch (err) {
+        next(err);
+    }
 });
 
 // ─── Book Shift (Atomic with FOR UPDATE equivalent) ──
@@ -408,7 +575,10 @@ router.post('/:id/assign', authenticate, authorize('SUPER_ADMIN'),
 // ─── Cancel Shift ─────────────────────────────
 
 router.patch('/:id/cancel', authenticate,
-    [body('reason').optional().trim()],
+    [
+        body('reason').optional().trim(),
+        body('cancelSeries').optional().isBoolean(),
+    ],
     validate,
     async (req, res, next) => {
         try {
@@ -428,11 +598,25 @@ router.patch('/:id/cancel', authenticate,
                     prisma.shift.update({ where: { id: req.params.id }, data: { status: 'OPEN' } }),
                 ]);
             } else {
-                // Admin/Facility cancels the shift entirely
-                await prisma.$transaction([
-                    prisma.shift.update({ where: { id: req.params.id }, data: { status: 'CANCELLED', cancelReason: req.body.reason, cancelledAt: new Date(), cancelledById: req.user.id } }),
-                    prisma.shiftAssignment.updateMany({ where: { shiftId: req.params.id, status: 'ACCEPTED' }, data: { status: 'CANCELLED', cancelledAt: new Date() } }),
-                ]);
+                if (req.body.cancelSeries === true) {
+                    await cancelRecurringSeries(req.params.id, req.user.id, req.body.reason);
+                } else {
+                    await prisma.$transaction([
+                        prisma.shift.update({
+                            where: { id: req.params.id },
+                            data: {
+                                status: 'CANCELLED',
+                                cancelReason: req.body.reason,
+                                cancelledAt: new Date(),
+                                cancelledById: req.user.id,
+                            },
+                        }),
+                        prisma.shiftAssignment.updateMany({
+                            where: { shiftId: req.params.id, status: 'ACCEPTED' },
+                            data: { status: 'CANCELLED', cancelledAt: new Date() },
+                        }),
+                    ]);
+                }
             }
 
             return successResponse(res, {}, 'Shift cancelled');
@@ -480,8 +664,8 @@ router.get('/', authenticate, async (req, res, next) => {
     } catch (err) { next(err); }
 });
 
-// GET /shifts/:id
-router.get('/:id', authenticate, async (req, res, next) => {
+// GET /shifts/nurse/:id
+router.get('/nurse/:id', authenticate, async (req, res, next) => {
     try {
         const shift = await prisma.shift.findUnique({
             where: { id: req.params.id },
